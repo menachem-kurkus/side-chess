@@ -24,6 +24,13 @@ From a shell:
 claude plugin install side-chess --marketplace menachem-kurkus/side-chess
 ```
 
+Older Claude Code without `--marketplace`:
+
+```bash
+claude plugin marketplace add menachem-kurkus/side-chess
+claude plugin install side-chess@side-chess
+```
+
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `menachem-kurkus/side-chess`, then Add plugin.
 
 The first time you click **Launch Side Chess**, Claude builds the app (`app/install.sh`, a minute or two) into `~/Applications/Side Chess.app`. You can also run that script yourself.
