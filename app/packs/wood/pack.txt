@@ -1,0 +1,23 @@
+# Side Chess pack: a classic wooden board. Only what differs from blue-gold is listed.
+name = Wood
+
+background = #F3EDE4
+accent = #B58863
+title = #5C3A1E
+status_your_move = #5C3A1E
+status_over = #8A5A2B
+
+board_border = #5C3A1E
+light_square = #F0D9B5
+dark_square = #B58863
+last_from = #E8E18E
+last_to = #D6CB5A
+last_outline = #7A6A12
+selected = #CDD26A
+target = #CDD26A99
+target_outline = #5C3A1E
+half_typed = #5C3A1E30
+
+banner = #F3EDE4
+banner_title = #5C3A1E
+banner_result = #8A5A2B

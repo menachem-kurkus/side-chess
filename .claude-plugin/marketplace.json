@@ -1,0 +1,5 @@
+{
+  "name": "side-chess",
+  "owner": { "name": "menachem-kurkus" },
+  "plugins": [{ "name": "side-chess", "source": "./" }]
+}

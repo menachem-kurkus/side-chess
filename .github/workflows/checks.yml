@@ -1,0 +1,27 @@
+name: checks
+on:
+  push:
+  pull_request:
+
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Formatting
+        working-directory: app
+        run: cargo fmt --check
+      - name: Tests
+        working-directory: app
+        run: CARGO_TARGET_DIR="$HOME/.side-chess/build" cargo test --release
+      - name: Build and install
+        run: bash app/install.sh
+      - name: Memory stays under 100 MB
+        run: scripts/check-memory.sh
+      - name: Plugin manifest, mod and skill are valid
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .

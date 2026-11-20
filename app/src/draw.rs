@@ -1,0 +1,209 @@
+//! What the window shows. Every colour comes from the pack (`th`), every size
+//! from the layout constants below, so a new look never needs code changes.
+use crate::canvas::{Canvas, Img};
+use crate::game::{game_over, move_list, sq, Game};
+use crate::pack::Theme;
+use crate::text::Txt;
+use shakmaty::{Color as Side, Position, Role, Square};
+
+// Layout, in points
+pub const SQ: f32 = 68.0; // one square
+pub const BX: f32 = 28.0; // board left
+pub const BY: f32 = 96.0; // board top
+pub const W: f32 = BX * 2.0 + SQ * 8.0;
+pub const H: f32 = BY + SQ * 8.0 + 76.0;
+
+/// Everything a frame needs to know beyond the game itself.
+pub struct View<'a> {
+    pub th: &'a Theme,
+    pub pieces: &'a Img,
+    pub txt: &'a Txt,
+    pub kb_file: Option<u32>, // half-typed square: the letter so far
+    pub kb_rank: Option<u32>, // half-typed square: the number so far
+    pub thinking_dots: usize, // 1..=3, animates "Claude is thinking"
+    pub show_pack_name: bool, // for two seconds after T
+}
+
+pub fn square_xy(s: Square) -> (f32, f32) {
+    let f = u32::from(s.file()) as f32;
+    let r = u32::from(s.rank()) as f32;
+    (BX + f * SQ, BY + (7.0 - r) * SQ)
+}
+
+/// The square under a point in the window, if any.
+pub fn square_at(x: f32, y: f32) -> Option<Square> {
+    let (fx, ry) = ((x - BX) / SQ, (y - BY) / SQ);
+    ((0.0..8.0).contains(&fx) && (0.0..8.0).contains(&ry)).then(|| sq(fx as u32, 7 - ry as u32))
+}
+
+/// Pieces image: King Queen Rook Bishop Knight Pawn across; white row, then black row.
+fn piece_tile(role: Role, side: Side) -> (f32, f32) {
+    let col = match role {
+        Role::King => 0.0,
+        Role::Queen => 1.0,
+        Role::Rook => 2.0,
+        Role::Bishop => 3.0,
+        Role::Knight => 4.0,
+        Role::Pawn => 5.0,
+    };
+    (col * 128.0, if side == Side::White { 0.0 } else { 128.0 })
+}
+
+pub fn frame(cv: &mut Canvas, g: &Game, v: &View) {
+    let (th, txt) = (v.th, v.txt);
+
+    // Header
+    cv.clear(th.background);
+    cv.rect(BX, 30.0, 6.0, 40.0, th.accent);
+    txt.draw(cv, "b30", "Chess", BX + 18.0, 58.0, th.title);
+    let (status, col) = match game_over(&g.pos) {
+        Some(_) => ("Game over".to_string(), th.status_over),
+        None if g.pos.turn() == Side::White => (
+            if g.pos.is_check() {
+                "Your move. You're in check."
+            } else {
+                "Your move"
+            }
+            .to_string(),
+            th.status_your_move,
+        ),
+        None => (
+            format!("Claude is thinking{}", ".".repeat(v.thinking_dots)),
+            th.status_waiting,
+        ),
+    };
+    txt.draw(
+        cv,
+        "b18",
+        &status,
+        W - BX - txt.width("b18", &status),
+        56.0,
+        col,
+    );
+
+    // Board
+    cv.rect(
+        BX - 4.0,
+        BY - 4.0,
+        SQ * 8.0 + 8.0,
+        SQ * 8.0 + 8.0,
+        th.board_border,
+    );
+    for r in 0..8u32 {
+        for f in 0..8u32 {
+            let s = sq(f, r);
+            let (x, y) = square_xy(s);
+            let light = (f + r) % 2 == 1;
+            cv.rect(
+                x,
+                y,
+                SQ,
+                SQ,
+                if light {
+                    th.light_square
+                } else {
+                    th.dark_square
+                },
+            );
+            // last move: where it came from (lighter) and where it landed (stronger)
+            if let Some((a, b)) = g.last {
+                if a == s {
+                    cv.rect(x, y, SQ, SQ, th.last_from);
+                }
+                if b == s {
+                    cv.rect(x, y, SQ, SQ, th.last_to);
+                    cv.rect_lines(x + 1.5, y + 1.5, SQ - 3.0, SQ - 3.0, 3.0, th.last_outline);
+                }
+            }
+            // half-typed square: tint the file or rank typed so far
+            if v.kb_file == Some(f) || v.kb_rank == Some(r) {
+                cv.rect(x, y, SQ, SQ, th.half_typed);
+            }
+            if g.selected == Some(s) {
+                cv.rect(x, y, SQ, SQ, th.selected);
+            }
+            if g.target == Some(s) {
+                cv.rect(x, y, SQ, SQ, th.target);
+                cv.rect_lines(x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0, 5.0, th.target_outline);
+            }
+            let lbl = if light {
+                th.dark_square
+            } else {
+                th.light_square
+            };
+            if f == 0 {
+                txt.draw(cv, "b11", &(r + 1).to_string(), x + 4.0, y + 14.0, lbl);
+            }
+            if r == 0 {
+                let file = ((b'a' + f as u8) as char).to_string();
+                txt.draw(cv, "b11", &file, x + SQ - 11.0, y + SQ - 5.0, lbl);
+            }
+            if let Some(p) = g.pos.board().piece_at(s) {
+                if p.role == Role::King && p.color == g.pos.turn() && g.pos.is_check() {
+                    cv.rect(x, y, SQ, SQ, th.check);
+                    cv.rect_lines(x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0, 4.0, th.check_outline);
+                }
+                let (tx, ty) = piece_tile(p.role, p.color);
+                cv.image(
+                    v.pieces,
+                    (tx, ty, 128.0, 128.0),
+                    (x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0),
+                    None,
+                );
+            }
+        }
+    }
+
+    // Game over: banner across the board
+    if let Some(msg) = game_over(&g.pos) {
+        cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
+        let (bw, bh) = (380.0, 150.0);
+        let (bx, by) = (BX + (SQ * 8.0 - bw) / 2.0, BY + (SQ * 8.0 - bh) / 2.0);
+        cv.rect(bx, by, bw, bh, th.banner);
+        cv.rect(bx, by, bw, 6.0, th.accent);
+        let (title, sub) = msg.split_once(". ").unwrap_or((&msg, ""));
+        let center = |style: &str, t: &str| bx + (bw - txt.width(style, t)) / 2.0;
+        txt.draw(
+            cv,
+            "b30",
+            title,
+            center("b30", title),
+            by + 58.0,
+            th.banner_title,
+        );
+        txt.draw(
+            cv,
+            "b18",
+            sub,
+            center("b18", sub),
+            by + 92.0,
+            th.banner_result,
+        );
+        let again = "Press N for a new game";
+        txt.draw(cv, "r14", again, center("r14", again), by + 126.0, th.muted);
+    }
+
+    // Footer: the last few moves, any note about Claude's move, the pack name after T
+    let fy = BY + SQ * 8.0 + 36.0;
+    let moves = if g.sans.is_empty() {
+        "No moves yet.".to_string()
+    } else {
+        let all = move_list(&g.sans);
+        let parts: Vec<&str> = all.split("  ").collect();
+        parts[parts.len().saturating_sub(5)..].join("    ")
+    };
+    txt.draw(cv, "r16", &moves, BX, fy, th.text);
+    if !g.note.is_empty() {
+        txt.draw(cv, "r14", &g.note, BX, fy + 26.0, th.error);
+    }
+    if v.show_pack_name {
+        txt.draw(
+            cv,
+            "r14",
+            &th.name,
+            W - BX - txt.width("r14", &th.name),
+            fy,
+            th.muted,
+        );
+    }
+}

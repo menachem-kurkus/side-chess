@@ -1,0 +1,7 @@
+{
+  "name": "side-chess",
+  "version": "0.1.0",
+  "description": "Play chess against your Claude Code session in a tiny Mac window while your other work runs.",
+  "license": "GPL-3.0-or-later",
+  "keywords": ["chess", "game", "mod"]
+}

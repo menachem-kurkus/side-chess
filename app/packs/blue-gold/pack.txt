@@ -1,0 +1,40 @@
+# Side Chess pack. Colours are #RRGGBB, or #RRGGBBAA for see-through.
+# Any key left out falls back to this pack (blue-gold), the default.
+name = Blue and Gold
+
+# window
+background = #FAF8F4
+accent = #D9B34A
+title = #0C3A97
+text = #1B1917
+muted = #5A564D
+error = #B3261E
+status_your_move = #1152D4
+status_waiting = #5A564D
+status_over = #8B6914
+
+# board
+board_border = #0C3A97
+light_square = #E8EEFC
+dark_square = #7F9DDB
+last_from = #F4ECDA
+last_to = #EED89A
+last_outline = #8B6914
+selected = #D9B34A
+target = #D9B34A8C
+target_outline = #0C3A97
+half_typed = #0C3A9738
+check = #B3261E8C
+check_outline = #B3261E
+
+# game-over banner
+shade = #00000059
+banner = #FAF8F4
+banner_title = #0C3A97
+banner_result = #8B6914
+
+# pieces, drawn at build time from piece_font unless the pack has its own pieces.png
+# (768 x 256: King Queen Rook Bishop Knight Pawn across, white row then black row, 128 px each)
+piece_font = /System/Library/Fonts/Apple Symbols.ttf
+piece_white = #FFFFFF
+piece_black = #1B1917
