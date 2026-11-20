@@ -12,16 +12,57 @@ jobs:
         with:
           components: rustfmt
       - name: Formatting
+        id: fmt
         working-directory: app
         run: cargo fmt --check
       - name: Tests
+        id: tests
+        if: ${{ !cancelled() }}
         working-directory: app
-        run: CARGO_TARGET_DIR="$HOME/.side-chess/build" cargo test --release
+        run: CARGO_TARGET_DIR="$HOME/.side-chess/build" cargo test --release 2>&1 | tee "$RUNNER_TEMP/tests.txt"
       - name: Build and install
+        id: build
+        if: ${{ !cancelled() }}
         run: bash app/install.sh
       - name: Memory stays under 100 MB
-        run: scripts/check-memory.sh
+        id: memory
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/check-memory.sh 2>&1 | tee "$RUNNER_TEMP/memory.txt"
       - name: Plugin manifest, mod and skill are valid
+        id: plugin
+        if: ${{ !cancelled() }}
         run: |
           npm install -g @anthropic-ai/claude-code
-          claude plugin validate .
+          claude plugin validate . 2>&1 | tee "$RUNNER_TEMP/plugin.txt"
+
+      # A readable table on the run's page (also linked from the pull request)
+      - name: Summary
+        if: ${{ always() }}
+        env:
+          FMT: ${{ steps.fmt.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          MEMORY: ${{ steps.memory.outcome }}
+          PLUGIN: ${{ steps.plugin.outcome }}
+        run: |
+          result() { case "$1" in success) echo "Passed" ;; failure) echo "**Failed**" ;; skipped|"") echo "Not run" ;; *) echo "$1" ;; esac; }
+          tests=$(grep -o "[0-9]* passed; [0-9]* failed" "$RUNNER_TEMP/tests.txt" 2>/dev/null | tail -1)
+          failed_tests=$(grep -E "^test .* FAILED$" "$RUNNER_TEMP/tests.txt" 2>/dev/null | sed -E 's/^test (tests::)?//; s/ \.\.\. FAILED//' | paste -sd, - | sed 's/,/, /g')
+          peak=$(grep -oE "peaked at [0-9]+ MB" "$RUNNER_TEMP/memory.txt" 2>/dev/null | grep -oE "[0-9]+" | tail -1)
+          settled=$(grep -oE "after 60s: [0-9]+ MB" "$RUNNER_TEMP/memory.txt" 2>/dev/null | grep -oE "[0-9]+ MB" | tail -1)
+          scale=$(sed -n 's/^screen scale: //p' "$RUNNER_TEMP/memory.txt" 2>/dev/null | tail -1)
+          mem_note=$(grep -E "^FAIL|exited early|was not played" "$RUNNER_TEMP/memory.txt" 2>/dev/null | head -1)
+          warnings=$(grep -c "❯" "$RUNNER_TEMP/plugin.txt" 2>/dev/null || true)
+          {
+            echo "## Side Chess checks"
+            echo
+            echo "| Check | Result | Detail |"
+            echo "|---|---|---|"
+            echo "| Formatting | $(result "$FMT") | \`cargo fmt --check\` |"
+            echo "| Tests | $(result "$TESTS") | ${tests:-no result}${failed_tests:+. Failed: $failed_tests} |"
+            echo "| Build and install | $(result "$BUILD") | \`app/install.sh\` |"
+            echo "| Memory under 100 MB | $(result "$MEMORY") | ${peak:+peak ${peak} MB of 100}${settled:+, settled ${settled}}${scale:+, screen ${scale}}${mem_note:+. $mem_note} |"
+            echo "| Plugin, mod and skill | $(result "$PLUGIN") | \`claude plugin validate\`${warnings:+, ${warnings} warning(s)} |"
+            echo
+            echo "Full output for each check is in the job log above."
+          } >> "$GITHUB_STEP_SUMMARY"
