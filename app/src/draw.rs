@@ -1,7 +1,7 @@
 //! What the window shows. Every colour comes from the pack (`th`), every size
 //! from the layout constants below, so a new look never needs code changes.
 use crate::canvas::{Canvas, Img};
-use crate::game::{game_over, move_list, sq, Game};
+use crate::game::{game_over, move_list, shown_to, sq, Game};
 use crate::pack::Theme;
 use crate::text::Txt;
 use shakmaty::{Color as Side, Position, Role, Square};
@@ -82,6 +82,16 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         col,
     );
 
+    // Where the selected piece can go (castling shows the king's square)
+    let mut goes: Vec<Square> = vec![];
+    if let Some(from) = g.selected {
+        for m in g.pos.legal_moves() {
+            if m.from() == Some(from) && !goes.contains(&shown_to(&m)) {
+                goes.push(shown_to(&m));
+            }
+        }
+    }
+
     // Board
     cv.rect(
         BX - 4.0,
@@ -152,6 +162,15 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
                     (x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0),
                     None,
                 );
+            }
+            // a faded dot on an empty square it can go to, a ring round a piece it can take
+            if goes.contains(&s) {
+                let (cx, cy) = (x + SQ / 2.0, y + SQ / 2.0);
+                if g.pos.board().piece_at(s).is_some() {
+                    cv.round(cx, cy, SQ / 2.0 - 3.0, SQ / 2.0 - 9.0, th.move_dot);
+                } else {
+                    cv.round(cx, cy, 10.0, 0.0, th.move_dot);
+                }
             }
         }
     }

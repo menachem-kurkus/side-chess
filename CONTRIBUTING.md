@@ -31,7 +31,7 @@ Thanks for helping. Anyone can open an issue or a pull request.
    - Don't load font files at run time. Text and pieces are baked into images by `app/build.rs`.
    - Redraw only when something changes (see `about_to_wait` in `main.rs`).
 4. **New behaviour comes with a test.** Rules and input live in `game.rs`, looks in `pack.rs`; both have tests at the bottom.
-5. **Keep the board free of move hints.** The board highlights only the selected piece, the half-typed row or column, the move waiting for Enter, the last move and check.
+5. **Keep the board's hints to the selected piece.** The board highlights the selected piece and its legal moves (faded dots, a ring on a capture), the half-typed row or column, the move waiting for Enter, the last move and check. It never suggests which move is best.
 6. **Licence.** Side Chess is GPL-3.0-or-later (its chess rules library, shakmaty, is GPL). By sending a pull request you agree your change is shared under the same licence. Don't paste code from projects with incompatible licences.
 7. **Only things you may share.** No keys, tokens or personal data. Images in a pack must be your own or under a licence that allows sharing (say which in the pack's folder).
 

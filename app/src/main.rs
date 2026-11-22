@@ -78,6 +78,10 @@ impl App {
                 g.pos = p;
             }
         }
+        // testing: CHESS_SELECT=e2 starts with that piece selected (to see its move dots)
+        if let Ok(sqr) = std::env::var("CHESS_SELECT") {
+            g.selected = sqr.parse().ok();
+        }
         let _ = fs::remove_file(live_dir().join("claude_move.txt"));
         write_state(&g);
         App {
