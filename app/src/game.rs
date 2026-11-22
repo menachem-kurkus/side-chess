@@ -106,7 +106,11 @@ pub fn pick_square(g: &mut Game, s: Square) {
 }
 
 pub fn live_dir() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".side-chess")
+    // HOME on Mac and in tests; USERPROFILE is the home folder on Windows
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into());
+    PathBuf::from(home).join(".side-chess")
 }
 
 pub fn sq(file: u32, rank: u32) -> Square {

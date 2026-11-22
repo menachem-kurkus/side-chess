@@ -1,14 +1,14 @@
 # Side Chess
 
-Play chess against your Claude Code session in a tiny Mac window while your other sessions work. You play white; Claude plays black.
+Play chess against your Claude Code session in a tiny Mac or Windows window while your other sessions work. You play white; Claude plays black.
 
-- A native Rust window that stays under 100 MB of memory (about 50 MB at its peak on a Retina Mac) and redraws only when something changes.
+- A native Rust window that stays under 100 MB of memory (about 50 MB at its peak on a Retina Mac; about 8 MB private, 23 MB at its peak, on Windows 11) and redraws only when something changes.
 - A **Launch Side Chess** button above the prompt (a Claude Code mod) opens the window and tells the session you've begun.
 - A `side-chess` skill teaches Claude to install the app, watch the game and answer each move.
 
 ## Install
 
-Needs macOS, [Rust](https://rustup.rs) and Claude Code.
+Needs macOS or Windows 10/11, [Rust](https://rustup.rs) (on Windows also the Visual Studio C++ Build Tools) and Claude Code.
 
 At the prompt of a terminal session:
 
@@ -33,20 +33,20 @@ claude plugin install side-chess@side-chess
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `menachem-kurkus/side-chess`, then Add plugin.
 
-The first time you click **Launch Side Chess**, Claude builds the app (`app/install.sh`, a minute or two) into `~/Applications/Side Chess.app`. You can also run that script yourself.
+The first time you click **Launch Side Chess**, Claude builds the app (a minute or two). On a Mac, `app/install.sh` puts it in `~/Applications/Side Chess.app`. On Windows, `app/install.ps1` puts it in `%LOCALAPPDATA%\Programs\Side Chess` and adds a Start Menu shortcut. You can also run the script yourself (Windows: `powershell -ExecutionPolicy Bypass -File app\install.ps1`).
 
 ## Play
 
 - Click a piece, then a square. Pawns promote to a queen.
 - Or type a square's letter and number, in either order (half a square tints its row or column), then the square to move to, then Enter. Typing another of your pieces switches to it; illegal squares are ignored. Esc clears.
-- U takes back your last move, N starts a new game, T switches the look (pack), P saves a screenshot.
+- Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, T switches the look (pack), P saves a screenshot.
 - The board shows the last move in gold, a king in check in red, and a banner for checkmate, stalemate or a draw. There are no move hints.
 
 ## How it works
 
-The app writes the position to `~/.side-chess/state.txt` after every move (whose turn, FEN, the move list, black's legal moves and a text board). Claude watches that file and answers by writing one move to `~/.side-chess/claude_move.txt`, which the app plays within a second. An illegal move shows a note and the app waits for another.
+The app writes the position to `~/.side-chess/state.txt` after every move (on Windows `~` is `%USERPROFILE%`) (whose turn, FEN, the move list, black's legal moves and a text board). Claude watches that file and answers by writing one move to `~/.side-chess/claude_move.txt`, which the app plays within a second. An illegal move shows a note and the app waits for another.
 
-The window is drawn in plain memory, without the graphics card: a graphics driver alone costs 60 MB or more and differs from Mac to Mac, so this keeps memory low and predictable. The pieces and text are drawn into small images at build time (`app/build.rs`) from fonts every Mac has, so nothing from Apple's fonts is shipped and no font is loaded while playing.
+The window is drawn in plain memory, without the graphics card: a graphics driver alone costs 60 MB or more and differs from Mac to Mac, so this keeps memory low and predictable. The pieces and text are drawn into small images at build time (`app/build.rs`) from fonts every Mac and Windows PC has (Apple Symbols and Arial, or Segoe UI Symbol and Arial), so nothing from Apple's or Microsoft's fonts is shipped and no font is loaded while playing.
 
 For testing, `CHESS_FEN="<fen>" ~/.side-chess/build/release/side-chess` starts from any position.
 

@@ -4,6 +4,54 @@ on:
   pull_request:
 
 jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Formatting
+        id: fmt
+        working-directory: app
+        run: cargo fmt --check
+      - name: Tests
+        id: tests
+        if: ${{ !cancelled() }}
+        working-directory: app
+        shell: bash
+        run: cargo test --release 2>&1 | tee "$RUNNER_TEMP/tests.txt"
+      - name: Build and install
+        id: build
+        if: ${{ !cancelled() }}
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File app\install.ps1
+      - name: Memory stays under 30 MB
+        id: memory
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: bash
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-memory.ps1 -Limit 30 2>&1 | tee "$RUNNER_TEMP/memory.txt"
+      - name: Summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          FMT: ${{ steps.fmt.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          MEMORY: ${{ steps.memory.outcome }}
+        run: |
+          result() { case "$1" in success) echo "Passed" ;; failure) echo "**Failed**" ;; skipped|"") echo "Not run" ;; *) echo "$1" ;; esac; }
+          peak=$(grep -oE "peaked at [0-9]+ MB" "$RUNNER_TEMP/memory.txt" 2>/dev/null | grep -oE "[0-9]+" | tail -1)
+          {
+            echo "## Side Chess checks (Windows)"
+            echo
+            echo "| Check | Result | Detail |"
+            echo "|---|---|---|"
+            echo "| Formatting | $(result "$FMT") | \`cargo fmt --check\` |"
+            echo "| Tests | $(result "$TESTS") | \`cargo test --release\` |"
+            echo "| Build and install | $(result "$BUILD") | \`app/install.ps1\` |"
+            echo "| Memory under 30 MB | $(result "$MEMORY") | ${peak:+peak ${peak} MB of 30 (private working set)} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   mac:
     runs-on: macos-latest
     steps:

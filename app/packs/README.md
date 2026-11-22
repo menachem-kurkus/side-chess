@@ -12,7 +12,7 @@ A pack is one look for Side Chess: a folder here with a `pack.txt`. Every folder
 
 ## Your own pieces
 
-By default a pack's pieces are drawn at build time from `piece_font` (Apple Symbols), filled with `piece_white` and `piece_black`.
+By default a pack's pieces are drawn at build time from `piece_font` (Apple Symbols on a Mac, Segoe UI Symbol on Windows; give several paths separated by `|` and the first one found is used), filled with `piece_white` and `piece_black`.
 
 To use your own art instead, add `pieces.png` to the pack folder:
 - 768 x 256 pixels, transparent background

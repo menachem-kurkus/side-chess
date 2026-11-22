@@ -1,16 +1,23 @@
 // Draws the chess pieces and the few text sizes the app uses into small
-// images at build time, from fonts every Mac already has. Shipping images
+// images at build time, from fonts every Mac and Windows PC already has. Shipping images
 // made from Apple's fonts isn't allowed, and loading the fonts at run time
 // would cost about 45 MB of memory, so they're baked here instead.
 use fontdue::{Font, FontSettings};
 use std::{env, fs, path::Path};
 
-const ARIAL: &str = "/System/Library/Fonts/Supplemental/Arial.ttf";
-const ARIAL_BOLD: &str = "/System/Library/Fonts/Supplemental/Arial Bold.ttf";
+// A font is one path, or several separated by "|" (the first one found is used).
+const ARIAL: &str = "/System/Library/Fonts/Supplemental/Arial.ttf|C:/Windows/Fonts/arial.ttf";
+const ARIAL_BOLD: &str =
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf|C:/Windows/Fonts/arialbd.ttf";
 
-fn font(path: &str) -> Font {
-    let bytes = fs::read(path)
-        .unwrap_or_else(|_| panic!("Side Chess builds on macOS only: {path} not found"));
+fn font(paths: &str) -> Font {
+    let bytes = paths
+        .split('|')
+        .map(str::trim)
+        .find_map(|p| fs::read(p).ok())
+        .unwrap_or_else(|| {
+            panic!("Side Chess builds on macOS and Windows only: none of {paths} found")
+        });
     Font::from_bytes(bytes, FontSettings::default()).unwrap()
 }
 

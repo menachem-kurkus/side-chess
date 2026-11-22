@@ -1,3 +1,4 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
 //! Side Chess: you play white in this window; a Claude Code session plays black
 //! by reading ~/.side-chess/state.txt and writing its move to
 //! ~/.side-chess/claude_move.txt.
@@ -140,7 +141,10 @@ impl App {
             }
             Key::Character(s) => {
                 for ch in s.chars().map(|c| c.to_ascii_lowercase()) {
-                    if self.mods.super_key() {
+                    // Cmd+Q / Cmd+W on Mac, Ctrl+Q / Ctrl+W on Windows
+                    if self.mods.super_key()
+                        || (cfg!(not(target_os = "macos")) && self.mods.control_key())
+                    {
                         if ch == 'q' || ch == 'w' {
                             el.exit();
                         }

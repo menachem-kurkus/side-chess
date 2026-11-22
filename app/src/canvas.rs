@@ -70,6 +70,16 @@ impl Img {
         let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
         let (fx, fy) = (x - x0 as f32, y - y0 as f32);
         let mut out = [0.0f32; 4];
+        // all four neighbours fully clear (most of a piece tile): nothing to blend
+        let w = self.w;
+        if self.px[y0 * w + x0][3]
+            | self.px[y0 * w + x1][3]
+            | self.px[y1 * w + x0][3]
+            | self.px[y1 * w + x1][3]
+            == 0
+        {
+            return out;
+        }
         for (px, py, wgt) in [
             (x0, y0, (1.0 - fx) * (1.0 - fy)),
             (x1, y0, fx * (1.0 - fy)),
