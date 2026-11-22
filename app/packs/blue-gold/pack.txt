@@ -38,5 +38,5 @@ banner_result = #8B6914
 piece_font = /System/Library/Fonts/Apple Symbols.ttf | C:/Windows/Fonts/seguisym.ttf
 piece_white = #FFFFFF
 piece_black = #1B1917
-# true takes the cross off the bishop
+# true takes the crosses off the king and the bishop
 piece_no_crosses = false

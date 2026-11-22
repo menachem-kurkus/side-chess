@@ -52,7 +52,7 @@ For testing, `CHESS_FEN="<fen>" ~/.side-chess/build/release/side-chess` starts f
 
 ## Make your own look
 
-Looks are **packs** (press T to switch; `No Crosses` is the Blue and Gold look with a plain bishop): a folder in `app/packs/` with one text file of colours, and optionally your own piece images. Copy `app/packs/wood`, change what you like, run the install script (`bash app/install.sh` on a Mac, `app\install.ps1` on Windows), and press T. Details: [app/packs/README.md](app/packs/README.md).
+Looks are **packs** (press T to switch; `No Crosses` is the Blue and Gold look with no crosses on the king or bishop): a folder in `app/packs/` with one text file of colours, and optionally your own piece images. Copy `app/packs/wood`, change what you like, run the install script (`bash app/install.sh` on a Mac, `app\install.ps1` on Windows), and press T. Details: [app/packs/README.md](app/packs/README.md).
 
 ## Contributing
 

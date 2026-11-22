@@ -106,7 +106,7 @@ fn blur(m: &[f32], w: usize, h: usize, r: i32) -> Vec<f32> {
 // Takes the cross off a bishop. In the outline glyph the cross is a loose shape lying
 // inside the body, so every part completely surrounded by another part is wiped; in the
 // filled glyph it is a hole in the body, so small enclosed holes are filled. The
-// king keeps the little cross on its crown.
+// king is handled by without_king_cross.
 // `on`, one pixel wider all round
 fn grow(on: &[bool], w: usize, h: usize) -> Vec<bool> {
     (0..w * h)
@@ -124,6 +124,34 @@ fn grow(on: &[bool], w: usize, h: usize) -> Vec<bool> {
             })
         })
         .collect()
+}
+
+// Takes the cross off a king: it is the top of the glyph, a narrow stem with one
+// short wide arm. Find the arm (the first row far wider than the stem) and wipe
+// every row down to a stem's length below it.
+fn without_king_cross(m: &mut [f32], w: usize, h: usize) {
+    let width = |y: usize| m[y * w..(y + 1) * w].iter().filter(|&&v| v > 0.5).count();
+    let Some(top) = (0..h).find(|&y| width(y) > 0) else {
+        return;
+    };
+    let stem = (top..top + 4)
+        .map(width)
+        .filter(|&n| n > 0)
+        .min()
+        .unwrap_or(1);
+    // the arm lies within the first fifth of the glyph's height
+    let Some(arm) = (top..(top + h / 5).min(h)).find(|&y| width(y) >= stem * 5 / 2) else {
+        return;
+    };
+    let arm_w = width(arm);
+    let mut arm_end = arm;
+    while arm_end + 1 < h && width(arm_end + 1) * 10 >= arm_w * 6 {
+        arm_end += 1;
+    }
+    let cut = (arm_end + (arm_end + 1 - arm) * 3 / 2 + 1).min(h - 1);
+    for v in &mut m[..(cut + 1) * w] {
+        *v = 0.0;
+    }
 }
 
 fn without_cross(m: &mut [f32], w: usize, h: usize, outline: bool) {
@@ -271,6 +299,10 @@ fn pieces(
             let (ox, oy) = ((i * S) as i32, (row * S) as i32);
             let mut fm = to_mask(&bf);
             let mut hm = to_mask(&bh);
+            if no_crosses && i == 0 {
+                without_king_cross(&mut fm, mf.width, mf.height);
+                without_king_cross(&mut hm, mh.width, mh.height);
+            }
             if no_crosses && i == 3 {
                 without_cross(&mut fm, mf.width, mf.height, false);
                 without_cross(&mut hm, mh.width, mh.height, true);
