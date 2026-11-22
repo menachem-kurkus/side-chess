@@ -250,13 +250,16 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    /// Saves the canvas as a PNG (the P key, or a `shot` file from Claude).
-    pub fn save_png(&self, path: &std::path::Path) -> std::io::Result<()> {
+    /// Saves the canvas as a PNG (the P key, or a `shot` file from Claude),
+    /// with the screen's colour profile (`icc`) so viewers show the right colours.
+    pub fn save_png(&self, path: &std::path::Path, icc: Option<Vec<u8>>) -> std::io::Result<()> {
         let file = std::fs::File::create(path)?;
-        let mut enc =
-            png::Encoder::new(std::io::BufWriter::new(file), self.w as u32, self.h as u32);
-        enc.set_color(png::ColorType::Rgb);
-        enc.set_depth(png::BitDepth::Eight);
+        let mut info = png::Info::with_size(self.w as u32, self.h as u32);
+        info.color_type = png::ColorType::Rgb;
+        info.bit_depth = png::BitDepth::Eight;
+        info.icc_profile = icc.map(Into::into);
+        let enc = png::Encoder::with_info(std::io::BufWriter::new(file), info)
+            .map_err(std::io::Error::other)?;
         let data: Vec<u8> = self
             .px
             .iter()

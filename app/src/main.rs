@@ -216,7 +216,8 @@ impl App {
         if self.shot {
             self.shot = false;
             let _ = fs::create_dir_all(live_dir());
-            let _ = cv.save_png(&live_dir().join("screen.png"));
+            let icc = self.screen.as_ref().and_then(Screen::icc);
+            let _ = cv.save_png(&live_dir().join("screen.png"), icc);
         }
         if let Some(screen) = &self.screen {
             presenter.present(px, w, h, scale, screen);

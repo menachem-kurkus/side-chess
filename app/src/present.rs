@@ -11,8 +11,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool};
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{
-    CGBitmapContextCreate, CGBitmapInfo, CGColorRenderingIntent, CGColorSpace, CGContext,
-    CGDataProvider, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo,
+    CGBitmapContextCreate, CGBitmapInfo, CGColorRenderingIntent, CGColorSpace, CGColorSpaceModel,
+    CGContext, CGDataProvider, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo,
 };
 use objc2_quartz_core::{kCAGravityTopLeft, CALayer, CATransaction};
 use std::ffi::c_void;
@@ -66,9 +66,16 @@ impl Presenter {
                 Some(ns) => msg_send![&**ns, CGColorSpace],
                 None => ptr::null_mut(),
             };
-            match NonNull::new(cg) {
-                Some(cg) => Screen(CFRetained::retain(cg)),
-                None => Screen(CGColorSpace::new_device_rgb().expect("a colour space")),
+            let cg = NonNull::new(cg).map(|cg| CFRetained::retain(cg));
+            match cg {
+                // only an ordinary RGB profile can hold the frame's pixels
+                Some(cg)
+                    if CGColorSpace::model(Some(&cg)) == CGColorSpaceModel::RGB
+                        && CGColorSpace::number_of_components(Some(&cg)) == 3 =>
+                {
+                    Screen(cg)
+                }
+                _ => Screen(CGColorSpace::new_device_rgb().expect("a colour space")),
             }
         }
     }
@@ -120,6 +127,11 @@ fn pixel_format() -> CGBitmapInfo {
 }
 
 impl Screen {
+    /// The profile's ICC data, to embed in screenshots.
+    pub fn icc(&self) -> Option<Vec<u8>> {
+        CGColorSpace::icc_data(Some(&self.0)).map(|d| d.to_vec())
+    }
+
     /// Converts RGBA pixels from the colours the app is designed in (what the
     /// window showed before this change: macOS's device RGB) to this screen's
     /// colours, with macOS's own colour matching. Alpha is left as it is.
