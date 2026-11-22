@@ -33,7 +33,7 @@ impl Game {
         let san = San::from_move(&self.pos, m).to_string();
         self.history.push((self.pos.clone(), self.last));
         self.pos = self.pos.clone().play(m).expect("legal move");
-        self.last = Some((m.from().unwrap_or(m.to()), m.to()));
+        self.last = Some((m.from().unwrap_or(m.to()), shown_to(m)));
         self.sans.push(san);
         self.selected = None;
         self.target = None;
@@ -61,10 +61,26 @@ pub fn queen_or_plain(m: &Move) -> bool {
     matches!(m.promotion(), None | Some(Role::Queen))
 }
 
+/// The square the moving piece lands on. shakmaty names the rook's square for
+/// castling; on the board the king lands two squares along (g or c file).
+pub fn shown_to(m: &Move) -> Square {
+    match m {
+        Move::Castle { king, rook } => {
+            let file = if rook.file() > king.file() {
+                File::G
+            } else {
+                File::C
+            };
+            Square::from_coords(file, king.rank())
+        }
+        _ => m.to(),
+    }
+}
+
 pub fn legal_to(pos: &Chess, from: Square, to: Square) -> Option<Move> {
     pos.legal_moves()
         .into_iter()
-        .find(|m| m.from() == Some(from) && m.to() == to && queen_or_plain(m))
+        .find(|m| m.from() == Some(from) && shown_to(m) == to && queen_or_plain(m))
 }
 
 pub fn dist(a: Square, b: Square) -> u32 {
@@ -197,7 +213,7 @@ pub fn parse_move(pos: &Chess, s: &str) -> Option<Move> {
             .legal_moves()
             .into_iter()
             .filter(|m| m.from().map(|f| f.to_string()) == Some(from.into()))
-            .filter(|m| m.to().to_string() == to)
+            .filter(|m| m.to().to_string() == to || shown_to(m).to_string() == to)
             .find(|m| match s.chars().nth(4) {
                 Some(ch) => m.promotion().map(|r| r.char()) == Some(ch),
                 None => m.promotion().is_none() || m.promotion() == Some(Role::Queen),
@@ -315,6 +331,29 @@ mod tests {
         g.undo();
         assert_eq!(g.pos, Chess::default());
         assert!(g.sans.is_empty());
+    }
+
+    #[test]
+    fn castling_works_by_click_and_by_from_to() {
+        let g = from_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1");
+        let s = |n: &str| Square::from_str(n).unwrap();
+        // the king moves two squares along; the rook comes with it
+        let m = legal_to(&g.pos, s("e1"), s("g1")).expect("O-O by clicking g1");
+        let after = g.pos.clone().play(&m).unwrap();
+        assert_eq!(
+            after.board().piece_at(s("f1")).map(|p| p.role),
+            Some(Role::Rook)
+        );
+        assert!(
+            legal_to(&g.pos, s("e1"), s("c1")).is_some(),
+            "O-O-O by clicking c1"
+        );
+        assert!(parse_move(&g.pos, "e1g1").is_some());
+        assert!(parse_move(&g.pos, "O-O").is_some());
+        // the last move shown is the king's, not the rook's
+        let mut g = g;
+        g.play(&m);
+        assert_eq!(g.last, Some((s("e1"), s("g1"))));
     }
 
     #[test]
