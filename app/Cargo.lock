@@ -1383,7 +1383,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "side-chess"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "fontdue",
  "objc2 0.6.5",

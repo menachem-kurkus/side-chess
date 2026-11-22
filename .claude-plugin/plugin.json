@@ -1,6 +1,6 @@
 {
   "name": "side-chess",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Play chess against your Claude Code session in a tiny Mac or Windows window while your other work runs.",
   "license": "GPL-3.0-or-later",
   "keywords": ["chess", "game", "mod"]
