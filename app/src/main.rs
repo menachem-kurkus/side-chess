@@ -253,10 +253,23 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes()
+        let mut attrs = Window::default_attributes()
             .with_title("Side Chess")
             .with_inner_size(LogicalSize::new(W as f64, H as f64))
             .with_resizable(false);
+        // The taskbar / title bar icon (a Mac gets its Dock icon from the .app bundle).
+        if cfg!(not(target_os = "macos")) {
+            let icon = Img::from_png(include_bytes!("../icon/icon-128.png"));
+            let rgba: Vec<u8> = icon.px.iter().flatten().copied().collect();
+            if let Ok(icon) = winit::window::Icon::from_rgba(rgba, icon.w as u32, icon.h as u32) {
+                #[cfg(windows)]
+                {
+                    use winit::platform::windows::WindowAttributesExtWindows;
+                    attrs = attrs.with_taskbar_icon(Some(icon.clone()));
+                }
+                attrs = attrs.with_window_icon(Some(icon));
+            }
+        }
         let window = Rc::new(el.create_window(attrs).expect("a window"));
         self.presenter = Some(Presenter::new(&window));
         window.request_redraw();

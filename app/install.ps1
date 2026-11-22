@@ -15,10 +15,12 @@ $dir = Join-Path $env:LOCALAPPDATA 'Programs\Side Chess'
 New-Item -ItemType Directory -Force $dir | Out-Null
 $exe = Join-Path $dir 'side-chess.exe'
 Copy-Item (Join-Path $env:CARGO_TARGET_DIR 'release\side-chess.exe') $exe -Force
+Copy-Item (Join-Path $PSScriptRoot 'icon\icon.ico') (Join-Path $dir 'icon.ico') -Force
 $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Side Chess.lnk'
 $sh = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
 $sh.TargetPath = $exe
 $sh.WorkingDirectory = $dir
+$sh.IconLocation = (Join-Path $dir 'icon.ico')
 $sh.Description = 'Play chess against your Claude Code session'
 $sh.Save()
 Write-Host "Installed: $exe"
