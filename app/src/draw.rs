@@ -49,7 +49,7 @@ fn piece_tile(role: Role, side: Side) -> (f32, f32) {
     (col * 128.0, if side == Side::White { 0.0 } else { 128.0 })
 }
 
-pub fn frame(cv: &mut Canvas, g: &Game, v: &View) {
+pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     let (th, txt) = (v.th, v.txt);
 
     // Header

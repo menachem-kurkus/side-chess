@@ -42,7 +42,15 @@ impl Txt {
     }
 
     /// Draws `s` with its baseline at `baseline` (points).
-    pub fn draw(&self, cv: &mut Canvas, style: &str, s: &str, x: f32, baseline: f32, col: Color) {
+    pub fn draw(
+        &self,
+        cv: &mut Canvas<'_>,
+        style: &str,
+        s: &str,
+        x: f32,
+        baseline: f32,
+        col: Color,
+    ) {
         let Some(&(ry, h, asc)) = self.rows.get(style) else {
             return;
         };
