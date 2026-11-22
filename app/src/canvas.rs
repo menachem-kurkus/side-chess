@@ -151,9 +151,14 @@ impl<'a> Canvas<'a> {
             return;
         }
         let (x0, y0, x1, y1) = self.bounds(x, y, w, h);
+        let solid = (c.a >= 1.0).then(|| to_u32([c.r, c.g, c.b])); // worked out once, not per pixel
         for row in y0..y1 {
-            for p in &mut self.px[row * self.w + x0..row * self.w + x1] {
-                *p = blend(*p, [c.r, c.g, c.b], c.a);
+            let line = &mut self.px[row * self.w + x0..row * self.w + x1];
+            match solid {
+                Some(v) => line.fill(v),
+                None => line
+                    .iter_mut()
+                    .for_each(|p| *p = blend(*p, [c.r, c.g, c.b], c.a)),
             }
         }
     }
@@ -193,6 +198,15 @@ impl<'a> Canvas<'a> {
                         continue;
                     }
                     let v = img.px[ry as usize * img.w + rx as usize];
+                    if v[3] == 0 {
+                        continue; // fully clear: nothing to draw
+                    }
+                    if v[3] == 255 && tint.is_none() {
+                        // fully solid: copy the pixel, no blending needed
+                        self.px[row * self.w + col] =
+                            (v[0] as u32) << 16 | (v[1] as u32) << 8 | v[2] as u32;
+                        continue;
+                    }
                     [
                         v[0] as f32 / 255.0,
                         v[1] as f32 / 255.0,
