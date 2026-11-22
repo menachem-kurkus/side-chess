@@ -5,14 +5,16 @@ A pack is one look for Side Chess: a folder here with a `pack.txt`. Every folder
 ## Make your own
 
 1. Copy a pack: `cp -r wood my-pack`.
-2. Edit `my-pack/pack.txt`. Change `name` and any colours. A pack lists only what it changes: anything left out comes from `blue-gold/pack.txt`, which lists every key with a comment.
+2. Edit `my-pack/pack.txt`. Change `name` and any colours (ordinary #RRGGBB, as on the web; the app matches them to each screen itself). A pack lists only what it changes: anything left out comes from `blue-gold/pack.txt`, which lists every key with a comment.
    - Colours are `#RRGGBB`, or `#RRGGBBAA` to be see-through (`AA` from `00` clear to `FF` solid).
    - Lines starting with `#` are comments.
-3. Rebuild: `bash app/install.sh`. The tests check that every pack loads (`cargo test`).
+3. Rebuild: `bash app/install.sh` on a Mac, or `powershell -ExecutionPolicy Bypass -File app\install.ps1` on Windows. The tests check that every pack loads (`cargo test`).
 
 ## Your own pieces
 
-By default a pack's pieces are drawn at build time from `piece_font` (Apple Symbols), filled with `piece_white` and `piece_black`.
+By default a pack's pieces are drawn at build time from `piece_font` (Apple Symbols on a Mac, Segoe UI Symbol on Windows; give several paths separated by `|` and the first one found is used), filled with `piece_white` and `piece_black`.
+
+`piece_no_crosses = true` takes the crosses off the king and the bishop (see the `no-cross` pack, which is Blue and Gold with that one line changed).
 
 To use your own art instead, add `pieces.png` to the pack folder:
 - 768 x 256 pixels, transparent background

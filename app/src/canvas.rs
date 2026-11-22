@@ -1,9 +1,9 @@
 //! A drawing surface in plain memory: filled rectangles, outlines and images.
-//! No graphics card is used, which keeps the app small on any Mac. The canvas
+//! No graphics card is used, which keeps the app small on any Mac or Windows PC. The canvas
 //! draws straight into the window's own pixel buffer (it keeps no copy of its
 //! own), so all drawing happens while the window is being redrawn.
 //! Coordinates are in window points; the canvas multiplies by the screen's
-//! scale (2 on Retina screens) itself.
+//! scale (2 on Retina screens, 1.25 or 1.5 on many Windows ones) itself.
 
 /// A colour with straight (not premultiplied) alpha, each part 0..1.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -62,6 +62,56 @@ impl Img {
         Img { w, h, px }
     }
 
+    /// The 128 px tiles of a pieces sheet, redrawn `tile` px wide and high (area
+    /// average, in alpha-weighted colour so edges stay clean). Done once per screen
+    /// scale, so drawing the pieces afterwards is a plain copy instead of resampling
+    /// every pixel of every piece on every frame.
+    pub fn with_tiles_of(&self, tile: usize) -> Img {
+        const SRC: usize = 128;
+        let (cols, rows) = (self.w / SRC, self.h / SRC);
+        let mut out = Img {
+            w: cols * tile,
+            h: rows * tile,
+            px: vec![[0; 4]; cols * tile * rows * tile],
+        };
+        let k = SRC as f32 / tile as f32; // source pixels per new pixel
+        for ty in 0..rows {
+            for tx in 0..cols {
+                for y in 0..tile {
+                    for x in 0..tile {
+                        let (x0, x1) = (x as f32 * k, (x + 1) as f32 * k);
+                        let (y0, y1) = (y as f32 * k, (y + 1) as f32 * k);
+                        let mut acc = [0.0f32; 4]; // r, g, b weighted by alpha; alpha
+                        let mut area = 0.0;
+                        for sy in y0.floor() as usize..(y1.ceil() as usize).min(SRC) {
+                            let wy = (y1.min(sy as f32 + 1.0) - y0.max(sy as f32)).max(0.0);
+                            for sx in x0.floor() as usize..(x1.ceil() as usize).min(SRC) {
+                                let wx = (x1.min(sx as f32 + 1.0) - x0.max(sx as f32)).max(0.0);
+                                let p = self.px[(ty * SRC + sy) * self.w + tx * SRC + sx];
+                                let a = p[3] as f32 / 255.0 * wx * wy;
+                                for c in 0..3 {
+                                    acc[c] += p[c] as f32 * a;
+                                }
+                                acc[3] += a;
+                                area += wx * wy;
+                            }
+                        }
+                        if acc[3] > 0.0 {
+                            let q = |v: f32| v.round().clamp(0.0, 255.0) as u8;
+                            out.px[(ty * tile + y) * out.w + tx * tile + x] = [
+                                q(acc[0] / acc[3]),
+                                q(acc[1] / acc[3]),
+                                q(acc[2] / acc[3]),
+                                q(acc[3] / area * 255.0),
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
     fn sample(&self, x: f32, y: f32) -> [f32; 4] {
         // bilinear, in straight alpha weighted by alpha so edges don't darken
         let x = x.clamp(0.0, self.w as f32 - 1.0);
@@ -70,6 +120,16 @@ impl Img {
         let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
         let (fx, fy) = (x - x0 as f32, y - y0 as f32);
         let mut out = [0.0f32; 4];
+        // all four neighbours fully clear (most of a piece tile): nothing to blend
+        let w = self.w;
+        if self.px[y0 * w + x0][3]
+            | self.px[y0 * w + x1][3]
+            | self.px[y1 * w + x0][3]
+            | self.px[y1 * w + x1][3]
+            == 0
+        {
+            return out;
+        }
         for (px, py, wgt) in [
             (x0, y0, (1.0 - fx) * (1.0 - fy)),
             (x1, y0, fx * (1.0 - fy)),
@@ -250,13 +310,16 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    /// Saves the canvas as a PNG (the P key, or a `shot` file from Claude).
-    pub fn save_png(&self, path: &std::path::Path) -> std::io::Result<()> {
+    /// Saves the canvas as a PNG (the P key, or a `shot` file from Claude),
+    /// with the screen's colour profile (`icc`) so viewers show the right colours.
+    pub fn save_png(&self, path: &std::path::Path, icc: Option<Vec<u8>>) -> std::io::Result<()> {
         let file = std::fs::File::create(path)?;
-        let mut enc =
-            png::Encoder::new(std::io::BufWriter::new(file), self.w as u32, self.h as u32);
-        enc.set_color(png::ColorType::Rgb);
-        enc.set_depth(png::BitDepth::Eight);
+        let mut info = png::Info::with_size(self.w as u32, self.h as u32);
+        info.color_type = png::ColorType::Rgb;
+        info.bit_depth = png::BitDepth::Eight;
+        info.icc_profile = icc.map(Into::into);
+        let enc = png::Encoder::with_info(std::io::BufWriter::new(file), info)
+            .map_err(std::io::Error::other)?;
         let data: Vec<u8> = self
             .px
             .iter()

@@ -17,6 +17,7 @@ pub const H: f32 = BY + SQ * 8.0 + 76.0;
 pub struct View<'a> {
     pub th: &'a Theme,
     pub pieces: &'a Img,
+    pub tile: f32, // size of one piece tile in `pieces` (128, or what the screen scale needs)
     pub txt: &'a Txt,
     pub kb_file: Option<u32>, // half-typed square: the letter so far
     pub kb_rank: Option<u32>, // half-typed square: the number so far
@@ -144,9 +145,10 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
                     cv.rect_lines(x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0, 4.0, th.check_outline);
                 }
                 let (tx, ty) = piece_tile(p.role, p.color);
+                let k = v.tile / 128.0;
                 cv.image(
                     v.pieces,
-                    (tx, ty, 128.0, 128.0),
+                    (tx * k, ty * k, v.tile, v.tile),
                     (x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0),
                     None,
                 );

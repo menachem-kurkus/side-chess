@@ -1,23 +1,24 @@
 ---
 name: side-chess
-description: Play black against the user in Side Chess, a tiny Mac chess window, or install it. Use when the user clicks Launch Side Chess, says they have begun a Side Chess game, or asks to play chess, install Side Chess, or watch the chess game.
+description: Play black against the user in Side Chess, a tiny Mac or Windows chess window, or install it. Use when the user clicks Launch Side Chess, says they have begun a Side Chess game, or asks to play chess, install Side Chess, or watch the chess game.
 ---
 
 # Side Chess
 
-The user plays white in the Side Chess window. You play black by reading one file and writing another. Everything lives in `~/.side-chess/`.
+The user plays white in the Side Chess window. You play black by reading one file and writing another. Everything lives in `~/.side-chess/` (on Windows that is `%USERPROFILE%\.side-chess`, the same folder from Git Bash).
 
 ## Install (only if it isn't installed)
 
-`~/Applications/Side Chess.app` missing means it isn't installed. Build it with the plugin's script (needs macOS and Rust; the first build takes a minute or two):
+On a Mac, `~/Applications/Side Chess.app` missing means it isn't installed. On Windows, the program is `%LOCALAPPDATA%\Programs\Side Chess\side-chess.exe`. Build it with the plugin's script (needs Rust; the first build takes a minute or two):
 
 ```bash
-bash "<plugin root>/app/install.sh"
+bash "<plugin root>/app/install.sh"                                                  # macOS
+powershell -NoProfile -ExecutionPolicy Bypass -File "<plugin root>/app/install.ps1"  # Windows
 ```
 
-The launch button's message names the plugin root. Without it, find the script with `find ~/.claude/plugins -path "*side-chess*/app/install.sh" | head -1`. If Rust is missing, tell the user to install it from https://rustup.rs and stop.
+The launch button's message names the plugin root. Without it, find the script with `find ~/.claude/plugins -path "*side-chess*/app/install.*" | head -2`. If Rust is missing, tell the user to install it from https://rustup.rs (on Windows it also needs the Visual Studio C++ Build Tools) and stop.
 
-Then open it: `open -a "Side Chess"`.
+Then open it: `open -a "Side Chess"` on a Mac, or on Windows `powershell -NoProfile -Command Start-Process "$env:LOCALAPPDATA\Programs\Side Chess\side-chess.exe"`.
 
 ## The files
 

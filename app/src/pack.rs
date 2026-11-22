@@ -71,6 +71,37 @@ pub fn pack_index(id: &str) -> Option<usize> {
 }
 
 impl Theme {
+    /// Every colour of the pack, for converting them all to a screen's colours.
+    pub fn colors_mut(&mut self) -> [&mut Color; 25] {
+        [
+            &mut self.background,
+            &mut self.accent,
+            &mut self.title,
+            &mut self.text,
+            &mut self.muted,
+            &mut self.error,
+            &mut self.status_your_move,
+            &mut self.status_waiting,
+            &mut self.status_over,
+            &mut self.board_border,
+            &mut self.light_square,
+            &mut self.dark_square,
+            &mut self.last_from,
+            &mut self.last_to,
+            &mut self.last_outline,
+            &mut self.selected,
+            &mut self.target,
+            &mut self.target_outline,
+            &mut self.half_typed,
+            &mut self.check,
+            &mut self.check_outline,
+            &mut self.shade,
+            &mut self.banner,
+            &mut self.banner_title,
+            &mut self.banner_result,
+        ]
+    }
+
     /// A pack's colours laid over the default pack's, so a pack lists only what it changes.
     pub fn load(index: usize) -> Result<Theme, String> {
         let mut keys = std::collections::HashMap::new();
@@ -130,6 +161,25 @@ pub fn load_pack(index: usize) -> (Theme, Img) {
         .or_else(|_| Theme::load(pack_index(DEFAULT_PACK).unwrap_or(0)))
         .expect("the default pack loads");
     (theme, Img::from_png(PACKS[index].2))
+}
+
+/// A pack with its colours and pieces converted to the screen the window is on.
+pub fn load_pack_for(index: usize, screen: &crate::present::Screen) -> (Theme, Img) {
+    let (mut th, mut pieces) = load_pack(index);
+    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let mut cols: Vec<[u8; 4]> = th
+        .colors_mut()
+        .iter()
+        .map(|c| [q(c.r), q(c.g), q(c.b), 255])
+        .collect();
+    screen.convert(&mut cols);
+    for (c, v) in th.colors_mut().into_iter().zip(cols) {
+        let a = c.a; // alpha stays as the pack says
+        *c = Color::rgba8(v[0], v[1], v[2], 255);
+        c.a = a;
+    }
+    screen.convert(&mut pieces.px);
+    (th, pieces)
 }
 
 #[cfg(test)]
