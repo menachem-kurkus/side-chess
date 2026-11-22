@@ -9,21 +9,24 @@
 //!   pack.rs   the look: colours and pieces from app/packs/<pack>/
 //!   text.rs   text from a baked atlas
 //!   canvas.rs drawing in plain memory (no graphics card: stays small)
+//!   present.rs showing frames in the screen's own colours
 //!   main.rs   the window, keys and mouse (this file)
 mod canvas;
 mod draw;
 mod game;
 mod pack;
+#[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
+mod present;
 mod text;
 
 use canvas::{Canvas, Img};
 use draw::{square_at, View, H, W};
 use game::{check_claude_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game};
-use pack::{load_pack, saved_pack, Theme, PACKS};
+use pack::{load_pack, load_pack_for, saved_pack, Theme, PACKS};
+use present::{Presenter, Screen};
 use shakmaty::{fen::Fen, Chess, Color as Side, Position};
 use std::{
     fs,
-    num::NonZeroU32,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -42,7 +45,8 @@ const POLL: Duration = Duration::from_millis(250);
 
 struct App {
     window: Option<Rc<Window>>,
-    surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
+    presenter: Option<Presenter>,
+    screen: Option<Screen>, // the screen the pack's colours were converted for
     g: Game,
     pack: usize,
     th: Theme,
@@ -77,7 +81,8 @@ impl App {
         write_state(&g);
         App {
             window: None,
-            surface: None,
+            presenter: None,
+            screen: None,
             g,
             pack,
             th,
@@ -161,7 +166,7 @@ impl App {
                         'u' => self.g.undo(),
                         't' if PACKS.len() > 1 => {
                             self.pack = (self.pack + 1) % PACKS.len();
-                            (self.th, self.pieces) = load_pack(self.pack);
+                            self.screen = None; // the next redraw loads it for this screen
                             let _ = fs::create_dir_all(live_dir());
                             let _ = fs::write(live_dir().join("pack.txt"), PACKS[self.pack].0);
                             self.pack_shown_at = Some(Instant::now());
@@ -184,14 +189,21 @@ impl App {
     }
 
     fn redraw(&mut self) {
-        let (Some(window), Some(surface)) = (&self.window, &mut self.surface) else {
+        let (Some(window), Some(presenter)) = (&self.window, &self.presenter) else {
             return;
         };
         let size = window.inner_size();
-        let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
+        let (w, h) = (size.width as usize, size.height as usize);
+        if w == 0 || h == 0 {
             return;
-        };
-        let scale = window.scale_factor() as f32;
+        }
+        let scale = window.scale_factor();
+        // New screen (or new pack): convert the pack's colours for this screen.
+        let screen = presenter.screen();
+        if self.screen.as_ref() != Some(&screen) {
+            (self.th, self.pieces) = load_pack_for(self.pack, &screen);
+            self.screen = Some(screen);
+        }
         let view = View {
             th: &self.th,
             pieces: &self.pieces,
@@ -203,21 +215,21 @@ impl App {
                 .pack_shown_at
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(2)),
         };
-        // Draw straight into the window's buffer: no second copy of the screen.
-        if surface.resize(w, h).is_err() {
-            return;
-        }
-        let Ok(mut buf) = surface.buffer_mut() else {
+        let Some(screen) = &self.screen else {
             return;
         };
-        let mut cv = Canvas::new(&mut buf, size.width as usize, size.height as usize, scale);
-        draw::frame(&mut cv, &self.g, &view);
-        if self.shot {
-            self.shot = false;
-            let _ = fs::create_dir_all(live_dir());
-            let _ = cv.save_png(&live_dir().join("screen.png"));
-        }
-        let _ = buf.present();
+        let (g, shot) = (&self.g, &mut self.shot);
+        // The presenter hands the closure the pixels to draw into: the window's own
+        // buffer where the system allows (Windows), else a frame it then hands over (Mac).
+        presenter.frame(w, h, scale, screen, |px| {
+            let mut cv = Canvas::new(px, w, h, scale as f32);
+            draw::frame(&mut cv, g, &view);
+            if *shot {
+                *shot = false;
+                let _ = fs::create_dir_all(live_dir());
+                let _ = cv.save_png(&live_dir().join("screen.png"), screen.icc());
+            }
+        });
     }
 }
 
@@ -231,8 +243,7 @@ impl ApplicationHandler for App {
             .with_inner_size(LogicalSize::new(W as f64, H as f64))
             .with_resizable(false);
         let window = Rc::new(el.create_window(attrs).expect("a window"));
-        let ctx = softbuffer::Context::new(window.clone()).expect("a drawing context");
-        self.surface = Some(softbuffer::Surface::new(&ctx, window.clone()).expect("a surface"));
+        self.presenter = Some(Presenter::new(&window));
         window.request_redraw();
         self.window = Some(window);
     }
@@ -260,6 +271,7 @@ impl ApplicationHandler for App {
                 self.key(&event.logical_key, el);
             }
             WindowEvent::Resized(_)
+            | WindowEvent::Moved(_) // maybe onto another screen
             | WindowEvent::ScaleFactorChanged { .. }
             | WindowEvent::Focused(_) => {
                 self.dirty = true;

@@ -11,9 +11,19 @@ path = "src/main.rs"
 
 [dependencies]
 winit = "0.30"
-softbuffer = "0.4"
 png = "0.17"
 shakmaty = "0.27"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Showing frames on macOS (the same bindings winit's helpers use)
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFData", "CFString"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "objc2", "CGColorSpace", "CGDataProvider", "CGImage", "CGContext", "CGBitmapContext"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CATransaction"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# Windows: the frame goes straight into the window's own buffer
+softbuffer = "0.4"
 
 [build-dependencies]
 fontdue = "0.9"

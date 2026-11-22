@@ -24,9 +24,10 @@ Thanks for helping. Anyone can open an issue or a pull request.
 
    If cargo cannot download crates and reports a revocation error (some proxies and antivirus), set `CARGO_HTTP_CHECK_REVOKE=false` for that shell.
 
-3. **Memory stays under 100 MB.** `scripts/check-memory.sh` launches the app, has Claude play a move and saves a screenshot, and fails if macOS reports 100 MB or more at any point in a minute (Activity Monitor's "Memory" column). It measures about 50 MB at its peak on an Apple silicon Mac with a Retina screen. On Windows `scripts/check-memory.ps1` does the same with the private working set (Task Manager's "Memory" column): about 8 MB on Windows 11, and CI holds it under 30 MB. Keep that headroom:
+3. **Memory stays under 100 MB.** `scripts/check-memory.sh` launches the app, has Claude play a move and saves a screenshot, and fails if macOS reports 100 MB or more at any point in a minute (Activity Monitor's "Memory" column). It measures about 35 MB at its peak on an Apple silicon Mac with a Retina screen. On Windows `scripts/check-memory.ps1` does the same with the private working set (Task Manager's "Memory" column): about 8 MB on Windows 11, and CI holds it under 30 MB. Keep that headroom:
    - Draw with `canvas.rs` (plain memory). Don't add a GPU or graphics library: the graphics driver alone costs 60 MB or more and varies by Mac.
    - Draw straight into the window's buffer; don't keep a second copy of the screen (each copy is about 7 MB on a Retina screen).
+   - Hand frames to macOS in the screen's own colours (`present.rs`). Colours that reach the canvas must come from the pack, converted with `load_pack_for`; a colour written straight into the code would show slightly wrong on wide-colour screens.
    - Don't load font files at run time. Text and pieces are baked into images by `app/build.rs`.
    - Redraw only when something changes (see `about_to_wait` in `main.rs`).
 4. **New behaviour comes with a test.** Rules and input live in `game.rs`, looks in `pack.rs`; both have tests at the bottom.
@@ -42,6 +43,7 @@ Thanks for helping. Anyone can open an issue or a pull request.
 | `app/src/draw.rs` | What the window shows (layout) |
 | `app/src/pack.rs` | Loading a pack's colours and pieces |
 | `app/src/canvas.rs` | Drawing in plain memory |
+| `app/src/present.rs` | Showing frames in the screen's own colours; converting pack colours per screen |
 | `app/src/text.rs` | Text from the baked atlas |
 | `app/src/main.rs` | The window, keys and mouse |
 | `app/build.rs` | Bakes pieces and text from the Mac's or Windows PC's own fonts at build time |

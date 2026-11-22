@@ -2,7 +2,7 @@
 
 Play chess against your Claude Code session in a tiny Mac or Windows window while your other sessions work. You play white; Claude plays black.
 
-- A native Rust window that stays under 100 MB of memory (about 50 MB at its peak on a Retina Mac; about 8 MB private, 23 MB at its peak, on Windows 11) and redraws only when something changes.
+- A native Rust window that stays under 100 MB of memory (about 35 MB at its peak on a Retina Mac; about 8 MB private, 23 MB at its peak, on Windows 11) and redraws only when something changes.
 - A **Launch Side Chess** button above the prompt (a Claude Code mod) opens the window and tells the session you've begun.
 - A `side-chess` skill teaches Claude to install the app, watch the game and answer each move.
 
@@ -46,7 +46,7 @@ The first time you click **Launch Side Chess**, Claude builds the app (a minute 
 
 The app writes the position to `~/.side-chess/state.txt` after every move (on Windows `~` is `%USERPROFILE%`) (whose turn, FEN, the move list, black's legal moves and a text board). Claude watches that file and answers by writing one move to `~/.side-chess/claude_move.txt`, which the app plays within a second. An illegal move shows a note and the app waits for another.
 
-The window is drawn in plain memory, without the graphics card: a graphics driver alone costs 60 MB or more and differs from Mac to Mac, so this keeps memory low and predictable. The pieces and text are drawn into small images at build time (`app/build.rs`) from fonts every Mac and Windows PC has (Apple Symbols and Arial, or Segoe UI Symbol and Arial), so nothing from Apple's or Microsoft's fonts is shipped and no font is loaded while playing.
+The window is drawn in plain memory, without the graphics card: a graphics driver alone costs 60 MB or more and differs from Mac to Mac, so this keeps memory low and predictable. Each frame is handed to macOS already in the screen's own colours (`app/src/present.rs`), so macOS has nothing to convert and keeps no converted copy; the pack's colours and pieces are converted once per screen instead. On Windows the frame goes straight into the window's own buffer (`softbuffer`), which needs no colour conversion. The pieces and text are drawn into small images at build time (`app/build.rs`) from fonts every Mac and Windows PC has (Apple Symbols and Arial, or Segoe UI Symbol and Arial), so nothing from Apple's or Microsoft's fonts is shipped and no font is loaded while playing.
 
 For testing, `CHESS_FEN="<fen>" ~/.side-chess/build/release/side-chess` starts from any position.
 
@@ -60,4 +60,4 @@ Pull requests are welcome. Tests, formatting, the plugin check and a memory chec
 
 ## Licence
 
-GPL-3.0-or-later (see `LICENSE`). Chess rules come from [shakmaty](https://github.com/niklasf/shakmaty) (GPL-3.0); the window uses [winit](https://github.com/rust-windowing/winit) and [softbuffer](https://github.com/rust-windowing/softbuffer) (Apache-2.0/MIT).
+GPL-3.0-or-later (see `LICENSE`). Chess rules come from [shakmaty](https://github.com/niklasf/shakmaty) (GPL-3.0); the window uses [winit](https://github.com/rust-windowing/winit) and the [objc2](https://github.com/madsmtm/objc2) macOS bindings (Apache-2.0/MIT).
