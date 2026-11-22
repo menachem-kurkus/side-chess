@@ -17,6 +17,7 @@ selected = #CDD26A
 target = #CDD26A99
 target_outline = #5C3A1E
 half_typed = #5C3A1E30
+move_dot = #5C3A1E52
 
 banner = #F3EDE4
 banner_title = #5C3A1E

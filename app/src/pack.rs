@@ -30,6 +30,7 @@ pub struct Theme {
     pub target: Color,
     pub target_outline: Color,
     pub half_typed: Color,
+    pub move_dot: Color,
     pub check: Color,
     pub check_outline: Color,
     pub shade: Color,
@@ -72,7 +73,7 @@ pub fn pack_index(id: &str) -> Option<usize> {
 
 impl Theme {
     /// Every colour of the pack, for converting them all to a screen's colours.
-    pub fn colors_mut(&mut self) -> [&mut Color; 25] {
+    pub fn colors_mut(&mut self) -> [&mut Color; 26] {
         [
             &mut self.background,
             &mut self.accent,
@@ -93,6 +94,7 @@ impl Theme {
             &mut self.target,
             &mut self.target_outline,
             &mut self.half_typed,
+            &mut self.move_dot,
             &mut self.check,
             &mut self.check_outline,
             &mut self.shade,
@@ -137,6 +139,7 @@ impl Theme {
             target: col("target")?,
             target_outline: col("target_outline")?,
             half_typed: col("half_typed")?,
+            move_dot: col("move_dot")?,
             check: col("check")?,
             check_outline: col("check_outline")?,
             shade: col("shade")?,

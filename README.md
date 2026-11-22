@@ -40,7 +40,7 @@ The first time you click **Launch Side Chess**, Claude builds the app (a minute 
 - Click a piece, then a square. Pawns promote to a queen.
 - Or type a square's letter and number, in either order (half a square tints its row or column), then the square to move to, then Enter. Typing another of your pieces switches to it; illegal squares are ignored. Esc clears.
 - Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, T switches the look (pack), P saves a screenshot.
-- The board shows the last move in gold, a king in check in red, and a banner for checkmate, stalemate or a draw. There are no move hints.
+- The board shows the last move in gold, a king in check in red, and a banner for checkmate, stalemate or a draw. Pick a piece and faded dots show where it can go (a ring on a piece it can take). Castling (click the king, then g or c) and en passant work.
 
 ## How it works
 

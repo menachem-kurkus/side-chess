@@ -206,6 +206,31 @@ impl<'a> Canvas<'a> {
         self.px.iter_mut().for_each(|p| *p = v);
     }
 
+    /// A disc (`inner` 0) or a ring, centred at (cx, cy) points, radii in points,
+    /// with soft edges. Used for the faded dots that show where a piece can go.
+    pub fn round(&mut self, cx: f32, cy: f32, outer: f32, inner: f32, c: Color) {
+        let s = self.scale;
+        let (cx, cy, outer, inner) = (cx * s, cy * s, outer * s, inner * s);
+        let (x0, x1) = (
+            (cx - outer - 1.0).floor().max(0.0) as usize,
+            ((cx + outer + 1.0).ceil() as usize).min(self.w),
+        );
+        let (y0, y1) = (
+            (cy - outer - 1.0).floor().max(0.0) as usize,
+            ((cy + outer + 1.0).ceil() as usize).min(self.h),
+        );
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                let cover = (outer - d + 0.5).clamp(0.0, 1.0) - (inner - d + 0.5).clamp(0.0, 1.0);
+                if cover > 0.0 {
+                    let i = y * self.w + x;
+                    self.px[i] = blend(self.px[i], [c.r, c.g, c.b], c.a * cover);
+                }
+            }
+        }
+    }
+
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: Color) {
         if c.a <= 0.0 {
             return;

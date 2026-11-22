@@ -357,6 +357,23 @@ mod tests {
     }
 
     #[test]
+    fn en_passant_works_by_click_and_by_move_text() {
+        // black has just played d7-d5 next to the white pawn on e5
+        let mut g = from_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3");
+        let s = |n: &str| Square::from_str(n).unwrap();
+        assert!(parse_move(&g.pos, "exd6").is_some());
+        assert!(parse_move(&g.pos, "e5d6").is_some());
+        let m = legal_to(&g.pos, s("e5"), s("d6")).expect("clicking d6 captures en passant");
+        g.play(&m);
+        assert!(
+            g.pos.board().piece_at(s("d5")).is_none(),
+            "the d5 pawn is taken"
+        );
+        assert_eq!(g.last, Some((s("e5"), s("d6"))));
+        assert_eq!(g.sans.last().map(String::as_str), Some("exd6"));
+    }
+
+    #[test]
     fn pawns_promote_to_a_queen() {
         let g = from_fen("8/4P1k1/8/8/8/8/8/4K3 w - - 0 1");
         let m = legal_to(&g.pos, s("e7"), s("e8")).unwrap();

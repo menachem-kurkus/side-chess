@@ -24,6 +24,7 @@ selected = #D9B34A
 target = #D9B34A8C
 target_outline = #0C3A97
 half_typed = #0C3A9738
+move_dot = #0C3A9747
 check = #B3261E8C
 check_outline = #B3261E
 
