@@ -2,7 +2,7 @@
 
 Play chess against your Claude Code session in a tiny Mac window while your other sessions work. You play white; Claude plays black.
 
-- A native Rust window that stays under 100 MB of memory (about 55 MB at its peak on a Retina Mac) and redraws only when something changes.
+- A native Rust window that stays under 100 MB of memory (about 50 MB at its peak on a Retina Mac) and redraws only when something changes.
 - A **Launch Side Chess** button above the prompt (a Claude Code mod) opens the window and tells the session you've begun.
 - A `side-chess` skill teaches Claude to install the app, watch the game and answer each move.
 

@@ -42,7 +42,6 @@ const POLL: Duration = Duration::from_millis(250);
 struct App {
     window: Option<Rc<Window>>,
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
-    canvas: Canvas,
     g: Game,
     pack: usize,
     th: Theme,
@@ -78,7 +77,6 @@ impl App {
         App {
             window: None,
             surface: None,
-            canvas: Canvas::new(1, 1, 1.0),
             g,
             pack,
             th,
@@ -190,12 +188,6 @@ impl App {
             return;
         };
         let scale = window.scale_factor() as f32;
-        if self.canvas.w != size.width as usize
-            || self.canvas.h != size.height as usize
-            || self.canvas.scale != scale
-        {
-            self.canvas = Canvas::new(size.width as usize, size.height as usize, scale);
-        }
         let view = View {
             th: &self.th,
             pieces: &self.pieces,
@@ -207,18 +199,21 @@ impl App {
                 .pack_shown_at
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(2)),
         };
-        draw::frame(&mut self.canvas, &self.g, &view);
-        if surface.resize(w, h).is_ok() {
-            if let Ok(mut buf) = surface.buffer_mut() {
-                buf.copy_from_slice(&self.canvas.px);
-                let _ = buf.present();
-            }
+        // Draw straight into the window's buffer: no second copy of the screen.
+        if surface.resize(w, h).is_err() {
+            return;
         }
+        let Ok(mut buf) = surface.buffer_mut() else {
+            return;
+        };
+        let mut cv = Canvas::new(&mut buf, size.width as usize, size.height as usize, scale);
+        draw::frame(&mut cv, &self.g, &view);
         if self.shot {
             self.shot = false;
             let _ = fs::create_dir_all(live_dir());
-            let _ = self.canvas.save_png(&live_dir().join("screen.png"));
+            let _ = cv.save_png(&live_dir().join("screen.png"));
         }
+        let _ = buf.present();
     }
 }
 

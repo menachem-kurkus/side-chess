@@ -1,7 +1,9 @@
 //! A drawing surface in plain memory: filled rectangles, outlines and images.
-//! No graphics card is used, which keeps the app small (about 30 MB for the
-//! window itself) on any Mac. Coordinates are in window points; the canvas
-//! multiplies by the screen's scale (2 on Retina screens) itself.
+//! No graphics card is used, which keeps the app small on any Mac. The canvas
+//! draws straight into the window's own pixel buffer (it keeps no copy of its
+//! own), so all drawing happens while the window is being redrawn.
+//! Coordinates are in window points; the canvas multiplies by the screen's
+//! scale (2 on Retina screens) itself.
 
 /// A colour with straight (not premultiplied) alpha, each part 0..1.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,12 +93,13 @@ impl Img {
     }
 }
 
-/// The window's pixels: 0x00RRGGBB, `w` x `h` physical pixels at `scale`.
-pub struct Canvas {
+/// The window's pixels: 0x00RRGGBB, `w` x `h` physical pixels at `scale`,
+/// borrowed from the window for the length of one redraw.
+pub struct Canvas<'a> {
     pub w: usize,
     pub h: usize,
     pub scale: f32,
-    pub px: Vec<u32>,
+    pub px: &'a mut [u32],
 }
 
 fn blend(dst: u32, c: [f32; 3], a: f32) -> u32 {
@@ -120,14 +123,10 @@ fn to_u32(c: [f32; 3]) -> u32 {
     (q(c[0]) << 16) | (q(c[1]) << 8) | q(c[2])
 }
 
-impl Canvas {
-    pub fn new(w: usize, h: usize, scale: f32) -> Self {
-        Canvas {
-            w,
-            h,
-            scale,
-            px: vec![0; w * h],
-        }
+impl<'a> Canvas<'a> {
+    pub fn new(px: &'a mut [u32], w: usize, h: usize, scale: f32) -> Self {
+        assert_eq!(px.len(), w * h, "the buffer matches the window size");
+        Canvas { w, h, scale, px }
     }
 
     /// Physical pixel bounds of a rectangle in points, clipped to the canvas.
