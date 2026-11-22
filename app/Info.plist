@@ -4,10 +4,11 @@
 <key>CFBundleName</key><string>Side Chess</string>
 <key>CFBundleDisplayName</key><string>Side Chess</string>
 <key>CFBundleIdentifier</key><string>dev.sidechess.app</string>
+<key>CFBundleIconFile</key><string>icon</string>
 <key>CFBundleExecutable</key><string>side-chess</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSAppSleepDisabled</key><true/>
 </dict></plist>
