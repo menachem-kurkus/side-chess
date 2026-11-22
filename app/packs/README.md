@@ -5,7 +5,7 @@ A pack is one look for Side Chess: a folder here with a `pack.txt`. Every folder
 ## Make your own
 
 1. Copy a pack: `cp -r wood my-pack`.
-2. Edit `my-pack/pack.txt`. Change `name` and any colours. A pack lists only what it changes: anything left out comes from `blue-gold/pack.txt`, which lists every key with a comment.
+2. Edit `my-pack/pack.txt`. Change `name` and any colours (ordinary #RRGGBB, as on the web; the app matches them to each screen itself). A pack lists only what it changes: anything left out comes from `blue-gold/pack.txt`, which lists every key with a comment.
    - Colours are `#RRGGBB`, or `#RRGGBBAA` to be see-through (`AA` from `00` clear to `FF` solid).
    - Lines starting with `#` are comments.
 3. Rebuild: `bash app/install.sh`. The tests check that every pack loads (`cargo test`).
