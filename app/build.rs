@@ -103,11 +103,152 @@ fn blur(m: &[f32], w: usize, h: usize, r: i32) -> Vec<f32> {
     sum.into_iter().map(|v| v / n).collect()
 }
 
+// Takes the cross off a bishop. In the outline glyph the cross is a loose shape lying
+// inside the body, so every part completely surrounded by another part is wiped; in the
+// filled glyph it is a hole in the body, so small enclosed holes are filled. The
+// king keeps the little cross on its crown.
+// `on`, one pixel wider all round
+fn grow(on: &[bool], w: usize, h: usize) -> Vec<bool> {
+    (0..w * h)
+        .map(|i| {
+            let (x, y) = ((i % w) as i32, (i / w) as i32);
+            (-1..=1).any(|dy| {
+                (-1..=1).any(|dx| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    nx >= 0
+                        && ny >= 0
+                        && nx < w as i32
+                        && ny < h as i32
+                        && on[ny as usize * w + nx as usize]
+                })
+            })
+        })
+        .collect()
+}
+
+fn without_cross(m: &mut [f32], w: usize, h: usize, outline: bool) {
+    // label the connected parts of `on` (8 neighbours); returns (label per pixel, size per label)
+    fn parts(on: &dyn Fn(usize) -> bool, w: usize, h: usize) -> (Vec<usize>, Vec<usize>) {
+        let mut label = vec![0usize; w * h];
+        let mut sizes = vec![0usize];
+        for start in 0..w * h {
+            if !on(start) || label[start] != 0 {
+                continue;
+            }
+            sizes.push(0);
+            let id = sizes.len() - 1;
+            let mut stack = vec![start];
+            label[start] = id;
+            while let Some(i) = stack.pop() {
+                sizes[id] += 1;
+                let (x, y) = ((i % w) as i32, (i / w) as i32);
+                for (dx, dy) in [
+                    (-1, -1),
+                    (0, -1),
+                    (1, -1),
+                    (-1, 0),
+                    (1, 0),
+                    (-1, 1),
+                    (0, 1),
+                    (1, 1),
+                ] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                        continue;
+                    }
+                    let j = ny as usize * w + nx as usize;
+                    if on(j) && label[j] == 0 {
+                        label[j] = id;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+        (label, sizes)
+    }
+    let ink: Vec<bool> = m.iter().map(|&v| v > 0.5).collect();
+    // the empty space that is not connected to the edge: holes
+    let (space, space_sizes) = parts(&|i| !ink[i], w, h);
+    let mut outside = vec![false; space_sizes.len()];
+    for x in 0..w {
+        outside[space[x]] = true;
+        outside[space[(h - 1) * w + x]] = true;
+    }
+    for y in 0..h {
+        outside[space[y * w]] = true;
+        outside[space[y * w + w - 1]] = true;
+    }
+    if outline {
+        // an ink part is enclosed when every pixel next to it is inside one hole
+        let (parts_, sizes) = parts(&|i| ink[i], w, h);
+        let mut around = vec![None::<usize>; sizes.len()]; // the hole that surrounds the part
+        let mut loose = vec![false; sizes.len()]; // touches the outside or two holes
+        for i in 0..w * h {
+            let l = parts_[i];
+            if l == 0 {
+                continue;
+            }
+            let (x, y) = ((i % w) as i32, (i / w) as i32);
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let (nx, ny) = (x + dx, y + dy);
+                let n = if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                    usize::MAX
+                } else {
+                    space[ny as usize * w + nx as usize]
+                };
+                if n == usize::MAX || (n != 0 && outside[n]) {
+                    loose[l] = true;
+                } else if n != 0 {
+                    match around[l] {
+                        None => around[l] = Some(n),
+                        Some(o) if o != n => loose[l] = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        // wipe those parts and their soft edges
+        let mut gone: Vec<bool> = (0..w * h)
+            .map(|i| parts_[i] != 0 && !loose[parts_[i]] && around[parts_[i]].is_some())
+            .collect();
+        for _ in 0..2 {
+            gone = grow(&gone, w, h);
+        }
+        for i in 0..w * h {
+            if gone[i] {
+                m[i] = 0.0;
+            }
+        }
+    } else {
+        // the cross is the biggest hole; fill it and the soft edge around it
+        let biggest = (1..space_sizes.len())
+            .filter(|&l| !outside[l])
+            .max_by_key(|&l| space_sizes[l]);
+        if let Some(hole) = biggest {
+            let mut fill: Vec<bool> = space.iter().map(|&l| l == hole).collect();
+            for _ in 0..2 {
+                fill = grow(&fill, w, h);
+            }
+            for i in 0..w * h {
+                if fill[i] {
+                    m[i] = 1.0;
+                }
+            }
+        }
+    }
+}
+
 fn to_mask(bytes: &[u8]) -> Vec<f32> {
     bytes.iter().map(|&b| b as f32 / 255.0).collect()
 }
 
-fn pieces(dest: &Path, font_path: &str, white_rgb: [f32; 3], black_rgb: [f32; 3]) {
+fn pieces(
+    dest: &Path,
+    font_path: &str,
+    white_rgb: [f32; 3],
+    black_rgb: [f32; 3],
+    no_crosses: bool,
+) {
     const S: usize = 128;
     let f = font(font_path);
     let px = S as f32 * 0.86;
@@ -128,7 +269,12 @@ fn pieces(dest: &Path, font_path: &str, white_rgb: [f32; 3], black_rgb: [f32; 3]
             let left = (S as i32 - mf.width as i32) / 2;
             let top = (S as i32 - mf.height as i32) / 2;
             let (ox, oy) = ((i * S) as i32, (row * S) as i32);
-            let fm = to_mask(&bf);
+            let mut fm = to_mask(&bf);
+            let mut hm = to_mask(&bh);
+            if no_crosses && i == 3 {
+                without_cross(&mut fm, mf.width, mf.height, false);
+                without_cross(&mut hm, mh.width, mh.height, true);
+            }
             // soft drop shadow
             let pad = 6usize;
             let (sw, sh) = (mf.width + pad * 2, mf.height + pad * 2);
@@ -175,7 +321,7 @@ fn pieces(dest: &Path, font_path: &str, white_rgb: [f32; 3], black_rgb: [f32; 3]
                 // the outline and the filled glyph share their outer shape: line up their boxes
                 let hx = left + (mf.width as i32 - mh.width as i32) / 2;
                 let hy = top + (mf.height as i32 - mh.height as i32) / 2;
-                sheet.paint(&to_mask(&bh), mh.width, mh.height, ox + hx, oy + hy, dark);
+                sheet.paint(&hm, mh.width, mh.height, ox + hx, oy + hy, dark);
             } else {
                 sheet.paint(&fm, mf.width, mf.height, ox + left, oy + top, dark);
             }
@@ -290,6 +436,7 @@ fn packs(out: &Path) {
                 &get("piece_font"),
                 rgb(&get("piece_white")),
                 rgb(&get("piece_black")),
+                get("piece_no_crosses") == "true",
             );
         }
         list += &format!(

@@ -1,0 +1,5 @@
+# Side Chess pack: the Blue and Gold look with the cross taken off the bishop.
+# Only what differs from blue-gold is listed.
+name = No Crosses
+
+piece_no_crosses = true

@@ -1,4 +1,4 @@
-//! Text, drawn from an atlas that build.rs bakes from the Mac's own Arial at
+//! Text, drawn from an atlas that build.rs bakes from the computer's own Arial at
 //! the few sizes the window uses ("b30" = bold 30 pt, "r14" = regular 14 pt...).
 //! Loading a real font at run time would cost about 45 MB, so it is baked.
 use crate::canvas::{Canvas, Color, Img};

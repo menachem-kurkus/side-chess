@@ -46,17 +46,17 @@ The first time you click **Launch Side Chess**, Claude builds the app (a minute 
 
 The app writes the position to `~/.side-chess/state.txt` after every move (on Windows `~` is `%USERPROFILE%`) (whose turn, FEN, the move list, black's legal moves and a text board). Claude watches that file and answers by writing one move to `~/.side-chess/claude_move.txt`, which the app plays within a second. An illegal move shows a note and the app waits for another.
 
-The window is drawn in plain memory, without the graphics card: a graphics driver alone costs 60 MB or more and differs from Mac to Mac, so this keeps memory low and predictable. Each frame is handed to macOS already in the screen's own colours (`app/src/present.rs`), so macOS has nothing to convert and keeps no converted copy; the pack's colours and pieces are converted once per screen instead. On Windows the frame goes straight into the window's own buffer (`softbuffer`), which needs no colour conversion. The pieces and text are drawn into small images at build time (`app/build.rs`) from fonts every Mac and Windows PC has (Apple Symbols and Arial, or Segoe UI Symbol and Arial), so nothing from Apple's or Microsoft's fonts is shipped and no font is loaded while playing.
+The window is drawn in plain memory, without the graphics card: a graphics driver alone costs 60 MB or more and differs from machine to machine, so this keeps memory low and predictable. Each frame is handed to macOS already in the screen's own colours (`app/src/present.rs`), so macOS has nothing to convert and keeps no converted copy; the pack's colours and pieces are converted once per screen instead. On Windows the frame goes straight into the window's own buffer (`softbuffer`), which needs no colour conversion. The pieces and text are drawn into small images at build time (`app/build.rs`) from fonts every Mac and Windows PC has (Apple Symbols and Arial, or Segoe UI Symbol and Arial), so nothing from Apple's or Microsoft's fonts is shipped and no font is loaded while playing.
 
 For testing, `CHESS_FEN="<fen>" ~/.side-chess/build/release/side-chess` starts from any position.
 
 ## Make your own look
 
-Looks are **packs**: a folder in `app/packs/` with one text file of colours, and optionally your own piece images. Copy `app/packs/wood`, change what you like, run `bash app/install.sh`, and press T. Details: [app/packs/README.md](app/packs/README.md).
+Looks are **packs** (press T to switch; `No Crosses` is the Blue and Gold look with a plain bishop): a folder in `app/packs/` with one text file of colours, and optionally your own piece images. Copy `app/packs/wood`, change what you like, run the install script (`bash app/install.sh` on a Mac, `app\install.ps1` on Windows), and press T. Details: [app/packs/README.md](app/packs/README.md).
 
 ## Contributing
 
-Pull requests are welcome. Tests, formatting, the plugin check and a memory check (under 100 MB) must pass; GitHub runs them on a Mac for every change. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Pull requests are welcome. Tests, formatting, the plugin check and a memory check (under 100 MB) must pass; GitHub runs them on a Mac and on Windows for every change. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 

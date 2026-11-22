@@ -20,7 +20,7 @@ mod present;
 mod text;
 
 use canvas::{Canvas, Img};
-use draw::{square_at, View, H, W};
+use draw::{square_at, View, H, SQ, W};
 use game::{check_claude_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game};
 use pack::{load_pack, load_pack_for, saved_pack, Theme, PACKS};
 use present::{Presenter, Screen};
@@ -51,6 +51,7 @@ struct App {
     pack: usize,
     th: Theme,
     pieces: Img,
+    sized: Option<(f64, usize, Img)>, // the pieces redrawn for the screen scale: (scale, tile px, image)
     txt: Txt,
     kb_file: Option<u32>,
     kb_rank: Option<u32>,
@@ -87,6 +88,7 @@ impl App {
             pack,
             th,
             pieces,
+            sized: None,
             txt: Txt::load(),
             kb_file: None,
             kb_rank: None,
@@ -203,10 +205,19 @@ impl App {
         if self.screen.as_ref() != Some(&screen) {
             (self.th, self.pieces) = load_pack_for(self.pack, &screen);
             self.screen = Some(screen);
+            self.sized = None;
+        }
+        // Windows screens often run at 125% or 150%: redraw the pieces once at the
+        // exact size they are shown, so a frame copies pixels instead of resampling.
+        // (A Mac's 2x screen is close enough to the 128 px tiles; left as it was.)
+        if cfg!(not(target_os = "macos")) && self.sized.as_ref().map(|s| s.0) != Some(scale) {
+            let tile = ((SQ - 4.0) as f64 * scale).round().max(1.0) as usize;
+            self.sized = Some((scale, tile, self.pieces.with_tiles_of(tile)));
         }
         let view = View {
             th: &self.th,
-            pieces: &self.pieces,
+            pieces: self.sized.as_ref().map_or(&self.pieces, |s| &s.2),
+            tile: self.sized.as_ref().map_or(128.0, |s| s.1 as f32),
             txt: &self.txt,
             kb_file: self.kb_file,
             kb_rank: self.kb_rank,
