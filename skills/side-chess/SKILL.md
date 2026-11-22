@@ -37,20 +37,22 @@ Keep exactly one watch running. Start it with the Monitor tool (30 minute timeou
 ```bash
 F=~/.side-chess/state.txt; last=""
 while true; do
-  t=$(head -1 "$F" 2>/dev/null); m=$(sed -n 4p "$F" 2>/dev/null)
-  if [[ "$t" != "turn: white (player)" && "$t$m" != "$last" ]]; then echo "$t | $m"; last="$t$m"; fi
+  t=$(head -1 "$F" 2>/dev/null); m=$(sed -n 4p "$F" 2>/dev/null); n=$(sed -n 5p "$F" 2>/dev/null)
+  if [[ "$t" != "turn: white (player)" && "$t$m$n" != "$last" ]]; then echo "$t | $m | $n"; last="$t$m$n"; fi
   sleep 1
 done
 ```
+
+The `note:` part matters: when a move of yours is rejected the moves line does not change, only the note does, so without it the watch stays silent and the game stalls waiting for you. If an event arrives for a turn you already answered and its note is not empty, your move was refused: pick again from `legal:`.
 
 If Monitor isn't available, use a background Bash command that exits when the turn line becomes `turn: black (Claude)`, and start it again after each move.
 
 ## Each of your turns
 
-1. Read `~/.side-chess/state.txt` in full.
+1. Read `~/.side-chess/state.txt` in full, every turn, and work from its `fen:` and text board. Never from your memory of earlier moves: that is how a piece you think you still have turns out to be gone.
 2. Pick a move from the `legal:` list only. Play real chess: look at what the user's last move threatens, check captures and checks for both sides, keep your king safe, then develop and attack. Play to win, but play at a friendly club level, not engine level.
 3. Write it: `echo "Nf6" > ~/.side-chess/claude_move.txt`.
-4. Read `state.txt` again a second later. If `note:` says your move was not legal, pick another from `legal:`.
+4. Read `state.txt` again a second later. If `note:` says your move was not legal, pick another from `legal:` straight away (and tell the user in a few words that you misjudged the position).
 5. Say one short line to the user, like "Nf6, covering e4." No long analysis unless asked.
 
 ## Game over
