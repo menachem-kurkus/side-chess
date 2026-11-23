@@ -231,6 +231,8 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     txt.draw(cv, "r16", &moves, BX, fy, th.text);
     if !g.note.is_empty() {
         txt.draw(cv, "r14", &g.note, BX, fy + 26.0, th.error);
+    } else if !g.hint.is_empty() {
+        txt.draw(cv, "r14", &g.hint, BX, fy + 26.0, th.error);
     }
     if v.show_pack_name {
         txt.draw(

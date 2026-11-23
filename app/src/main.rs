@@ -173,11 +173,8 @@ impl App {
                             self.g = Game::new_as(self.g.player);
                             write_state(&self.g);
                         }
-                        // swap sides: a new game with the other colour for you
-                        's' => {
-                            self.g = Game::new_as(self.g.player.other());
-                            write_state(&self.g);
-                        }
+                        // swap sides: only between games (refused mid-game: press N first)
+                        's' => self.g.swap_sides(),
                         'u' => self.g.undo(),
                         't' if PACKS.len() > 1 => {
                             self.pack = (self.pack + 1) % PACKS.len();

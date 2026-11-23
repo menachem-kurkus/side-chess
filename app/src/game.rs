@@ -20,6 +20,7 @@ pub struct Game {
     pub target: Option<Square>, // keyboard: square offered for the selected piece, played on Enter
     pub last: Option<(Square, Square)>,
     pub note: String,
+    pub hint: String, // shown in the window only, never in state.txt (a non-empty `note:` there makes the AI think its move was refused)
 }
 
 impl Game {
@@ -39,6 +40,20 @@ impl Game {
             target: None,
             last: None,
             note: String::new(),
+            hint: String::new(),
+        }
+    }
+
+    /// S swaps sides, but only between games: before the first move, or once the game
+    /// is over. In the middle of a game it is refused with a message in the window and
+    /// nothing changes (press N for a new game first).
+    pub fn swap_sides(&mut self) {
+        let in_progress = !self.sans.is_empty() && game_over(&self.pos, self.player).is_none();
+        if in_progress {
+            self.hint = "Game in progress. Press N for a new game, then S to swap sides.".into();
+        } else {
+            *self = Game::new_as(self.player.other());
+            write_state(self);
         }
     }
 
@@ -51,6 +66,7 @@ impl Game {
         self.selected = None;
         self.target = None;
         self.note.clear();
+        self.hint.clear();
         write_state(self);
     }
 
@@ -194,6 +210,17 @@ pub fn turn_text(g: &Game) -> String {
 
 // The file an AI session reads every turn
 pub fn write_state(g: &Game) {
+    let text = state_text(g);
+    let dir = live_dir();
+    let _ = fs::create_dir_all(&dir);
+    let tmp = dir.join("state.tmp");
+    if fs::write(&tmp, text).is_ok() {
+        let _ = fs::rename(tmp, dir.join("state.txt"));
+    }
+}
+
+/// What state.txt says. (The window-only `hint` is not in it.)
+pub fn state_text(g: &Game) -> String {
     let pos = &g.pos;
     let fen = Fen::from_position(pos.clone(), EnPassantMode::Legal).to_string();
     let turn = turn_text(g);
@@ -215,19 +242,13 @@ pub fn write_state(g: &Game) {
         .iter()
         .map(|m| San::from_move(pos, m).to_string())
         .collect();
-    let text = format!(
+    format!(
         "turn: {turn}\nfen: {fen}\ncheck: {}\nmoves: {}\nnote: {}\nlegal: {}\n\n{board}",
         pos.is_check(),
         move_list(&g.sans),
         g.note,
         legal.join(" "),
-    );
-    let dir = live_dir();
-    let _ = fs::create_dir_all(&dir);
-    let tmp = dir.join("state.tmp");
-    if fs::write(&tmp, text).is_ok() {
-        let _ = fs::rename(tmp, dir.join("state.txt"));
-    }
+    )
 }
 
 // An AI reply: SAN (Nf6) or from-to (g8f6)
@@ -629,5 +650,37 @@ mod tests {
         assert_eq!(turn_text(&g), "black (player)");
         let mate = from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3");
         assert_eq!(turn_text(&mate), "game over: Checkmate. AI wins.");
+    }
+
+    #[test]
+    fn s_is_refused_mid_game_and_only_swaps_a_new_or_finished_game() {
+        setup();
+        // a game in progress: refused, nothing changes, a message for the window
+        let mut g = from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        g.play(&parse_move(&g.pos, "e4").unwrap());
+        g.play(&parse_move(&g.pos, "e5").unwrap());
+        let before = (g.player, g.sans.clone(), g.pos.clone());
+        g.swap_sides();
+        assert_eq!((g.player, g.sans.clone(), g.pos.clone()), before);
+        assert!(g.hint.contains("Press N"), "{}", g.hint);
+        // the message is for the window only: state.txt (and its note:) never carries it
+        assert!(g.note.is_empty());
+        assert!(!state_text(&g).contains("Press N"), "{}", state_text(&g));
+        assert!(state_text(&g).contains("\nnote: \n"));
+        // the next move clears the message
+        g.play(&parse_move(&g.pos, "Nf3").unwrap());
+        assert!(g.hint.is_empty());
+        // before the first move: swaps, and the AI (white) opens
+        let mut fresh = Game::new();
+        fresh.swap_sides();
+        assert_eq!(fresh.player, Side::Black);
+        assert!(fresh.hint.is_empty());
+        assert_eq!(turn_text(&fresh), "white (AI)");
+        // after the game has ended: swaps, back to a new game
+        let mut over = from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3");
+        over.sans.push("Qh4#".into());
+        over.swap_sides();
+        assert_eq!(over.player, Side::Black);
+        assert!(over.sans.is_empty());
     }
 }

@@ -5,7 +5,7 @@ description: Play against the user in Side Chess, a tiny Mac, Windows or Linux c
 
 # Side Chess
 
-The user plays white in the Side Chess window by default, and you play black; the user can press S to swap, so you play white and the user plays black. You play whichever side `state.txt` marks `(AI)`, by reading one file and writing another. Everything lives in `~/.side-chess/` (on Windows that is `%USERPROFILE%\.side-chess`, the same folder from Git Bash).
+The user plays white in the Side Chess window by default, and you play black; the user can press S to swap between games (never mid-game), so you play white and the user plays black. You play whichever side `state.txt` marks `(AI)`, by reading one file and writing another. Everything lives in `~/.side-chess/` (on Windows that is `%USERPROFILE%\.side-chess`, the same folder from Git Bash).
 
 ## Install or update
 
@@ -57,8 +57,8 @@ If Monitor isn't available, use a background Bash command that exits when the tu
 
 ## Game over
 
-When `turn:` starts with `game over:`, say the result in one line. Keep watching: the user presses N in the window for a new game (same sides), or S to swap sides and start a new game. If the AI is white, you move first, so `turn:` is `white (AI)` straight away and the watch fires at once.
+When `turn:` starts with `game over:`, say the result in one line. Keep watching: the user presses N in the window for a new game (same sides), or S to swap sides and start a new game (S only works on a new or finished game; mid-game the app refuses it with a message in its window, and nothing changes for you). If the AI is white, you move first, so `turn:` is `white (AI)` straight away and the watch fires at once.
 
 ## Keys in the window (for the user)
 
-Click a piece then a square, or type a square's letter and number (either order; half a square tints its row or column), then the target square, then Enter. Esc clears, U takes back, N starts a new game, S swaps sides (you play black, the AI white) and starts a new game, T switches the look (pack), P saves a screenshot.
+Click a piece then a square, or type a square's letter and number (either order; half a square tints its row or column), then the target square, then Enter. Esc clears, U takes back, N starts a new game, S swaps sides (you play black, the AI white) and starts a new game, only between games (mid-game press N first), T switches the look (pack), P saves a screenshot.

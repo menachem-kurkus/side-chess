@@ -5,7 +5,7 @@ description: Play as the AI opponent (black, or white after the user presses S) 
 
 # Side Chess
 
-The user plays white in the Side Chess window by default, and you play black when asked to play or continue. The user can press S to swap sides, and then you play white. You play whichever side `state.txt` marks `(AI)`. The app stores the current position in `~/.side-chess/state.txt` (on Windows, `%USERPROFILE%\.side-chess\state.txt`) and reads your move from `opponent_move.txt` in that same folder. This skill expects app version 0.2.2 or later; swapping sides needs 0.3.0 or later. No API key or network connection is needed during play.
+The user plays white in the Side Chess window by default, and you play black when asked to play or continue. The user can press S to swap sides between games (the app refuses it mid-game), and then you play white. You play whichever side `state.txt` marks `(AI)`. The app stores the current position in `~/.side-chess/state.txt` (on Windows, `%USERPROFILE%\.side-chess\state.txt`) and reads your move from `opponent_move.txt` in that same folder. This skill expects app version 0.2.2 or later; swapping sides needs 0.3.0 or later. No API key or network connection is needed during play.
 
 ## Check the app version
 
