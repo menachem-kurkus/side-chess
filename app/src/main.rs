@@ -26,7 +26,9 @@ use draw::{square_at, View, H, SQ, W};
 use game::{
     check_opponent_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game,
 };
-use pack::{load_pack, load_pack_for, saved_pack, Theme, PACKS};
+use pack::{
+    load_look_for, load_pack, piece_sets, save_pieces, saved_pack, saved_pieces, Theme, PACKS,
+};
 use present::{Presenter, Screen};
 use rails::{Hit, Mode, Panel, Rails, LEN, TOP};
 use shakmaty::{fen::Fen, Chess, Color as Side, Position};
@@ -87,6 +89,9 @@ struct App {
     slide_from: Option<Instant>, // when the last move's slide began
     native_seen: Option<native::Native>, // the system colours the native look was last built from
     pack_names: Vec<String>,
+    piece_names: Vec<String>,     // the piece sets in the Pieces list
+    pieces_choice: Option<usize>, // a piece set picked on its own; None follows the colours
+    preview_pieces: Option<Option<usize>>, // a pieces row the pointer is on (None inside: "same as colours")
 }
 
 impl App {
@@ -143,12 +148,68 @@ impl App {
                         .unwrap_or_else(|_| PACKS[i].0.to_string())
                 })
                 .collect(),
+            piece_names: piece_sets()
+                .iter()
+                .map(|&i| {
+                    if PACKS[i].0 == pack::DEFAULT_PACK {
+                        "Classic".to_string()
+                    } else {
+                        Theme::load(i)
+                            .map(|t| t.name)
+                            .unwrap_or_else(|_| PACKS[i].0.to_string())
+                    }
+                })
+                .collect(),
+            pieces_choice: saved_pieces(),
+            preview_pieces: None,
         }
     }
 
     /// The look on screen: the one under the pointer in the Look list, else the chosen one.
     fn shown_pack(&self) -> usize {
         self.preview.unwrap_or(self.pack)
+    }
+
+    /// The piece set on screen: the one the pointer is on in the Pieces list, else the one
+    /// picked on its own, else the colours' own.
+    fn shown_pieces(&self) -> usize {
+        self.preview_pieces
+            .unwrap_or(self.pieces_choice)
+            .unwrap_or_else(|| self.shown_pack())
+    }
+
+    /// The row of the Pieces list that is in use (0 is "same as colours").
+    fn pieces_row(&self) -> usize {
+        self.pieces_choice
+            .and_then(|c| piece_sets().iter().position(|&s| s == c))
+            .map_or(0, |k| k + 1)
+    }
+
+    /// What a row of the Pieces list stands for.
+    fn row_choice(row: usize) -> Option<usize> {
+        row.checked_sub(1)
+            .and_then(|k| piece_sets().get(k).copied())
+    }
+
+    /// Pick a piece set on its own (None: follow the colours again) and remember it.
+    fn set_pieces(&mut self, choice: Option<usize>) {
+        self.pieces_choice = choice;
+        self.preview_pieces = None;
+        self.screen = None;
+        save_pieces(choice);
+        self.dirty = true;
+    }
+
+    /// Show a piece set while the pointer is on its row in the list (None when it leaves).
+    fn preview_pieces_row(&mut self, row: Option<usize>) {
+        let want = row
+            .map(Self::row_choice)
+            .filter(|c| *c != self.pieces_choice);
+        if want != self.preview_pieces {
+            self.preview_pieces = want;
+            self.screen = None;
+            self.dirty = true;
+        }
     }
 
     /// Choose a look (T, or a click in the Look list) and remember it.
@@ -234,6 +295,7 @@ impl App {
             r.hover = None;
         }
         self.preview_pack(None); // a closed or folded list can't keep a look on show
+        self.preview_pieces_row(None);
         self.place_rails();
     }
 
@@ -289,6 +351,8 @@ impl App {
             rails: &self.rails,
             pack: self.pack,
             pack_names: &self.pack_names,
+            piece_names: &self.piece_names,
+            pieces_row: self.pieces_row(),
             slide: None,
         };
         rw.presenter.frame(w, h, scale, screen, |px| {
@@ -405,7 +469,7 @@ impl App {
         let screen = presenter.screen();
         let screen_changed = self.screen.as_ref() != Some(&screen);
         if screen_changed {
-            (self.th, self.pieces) = load_pack_for(self.shown_pack(), &screen);
+            (self.th, self.pieces) = load_look_for(self.shown_pack(), self.shown_pieces(), &screen);
             self.screen = Some(screen);
             self.sized = None;
             if PACKS[self.shown_pack()].0 == "native" {
@@ -446,6 +510,8 @@ impl App {
             rails: &self.rails,
             pack: self.pack,
             pack_names: &self.pack_names,
+            piece_names: &self.piece_names,
+            pieces_row: self.pieces_row(),
             slide,
         };
         let Some(screen) = &self.screen else {
@@ -525,10 +591,14 @@ impl ApplicationHandler for App {
                         r.hover = hover;
                         self.dirty = true;
                     }
-                    self.preview_pack(match hover {
-                        Some(Hit::Pick(i)) => Some(i),
-                        _ => None,
-                    });
+                    // pointing at a row shows it; leaving the lists puts the chosen look back
+                    let (colours, pieces) = match hover {
+                        Some(Hit::Colours(i)) => (Some(i), None),
+                        Some(Hit::Pieces(i)) => (None, Some(i)),
+                        _ => (None, None),
+                    };
+                    self.preview_pack(colours);
+                    self.preview_pieces_row(pieces);
                 }
                 None => {
                     let s = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
@@ -541,6 +611,7 @@ impl ApplicationHandler for App {
                         self.dirty = true;
                     }
                     self.preview_pack(None);
+                    self.preview_pieces_row(None);
                 }
             }
             WindowEvent::MouseInput {
@@ -551,8 +622,11 @@ impl ApplicationHandler for App {
                 match rail {
                     Some(i) => {
                         let (p, (x, y)) = (self.rail_wins[i].panel, self.rail_wins[i].mouse);
-                        if let Some(Hit::Pick(k)) = self.rails.hit(p, x, y) {
-                            self.set_pack(k); // a click keeps the look the pointer is on
+                        let hit = self.rails.hit(p, x, y);
+                        if let Some(Hit::Colours(k)) = hit {
+                            self.set_pack(k); // a click keeps the colours the pointer is on
+                        } else if let Some(Hit::Pieces(row)) = hit {
+                            self.set_pieces(Self::row_choice(row)); // ... or the pieces
                         } else if self.rails.click(p, x, y) {
                             self.rails_changed(el);
                         }

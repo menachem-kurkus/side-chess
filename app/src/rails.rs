@@ -28,12 +28,14 @@ pub enum Mode {
 pub enum Hit {
     Toggle, // open a rail, or fold an open panel back to its rail
     Hide,
-    Pick(usize), // a look in the Look panel's list (the app switches to it)
+    Colours(usize), // a row in the Look panel's list of colours (the app switches to it)
+    Pieces(usize),  // a row in its list of pieces: 0 is "same as the colours", then each piece set
 }
 
 pub const RAIL_W: f32 = 26.0;
 const KEYS_W: f32 = 236.0;
-const LOOK_W: f32 = 208.0;
+const LOOK_W: f32 = 404.0; // two lists side by side: colours and pieces
+const COL_W: f32 = 184.0; // one of those lists
 const GAP: f32 = 6.0; // between a rail window and the board window
 pub const TOP: f32 = BY - 4.0; // level with the board's border, from the board window's top
 pub const LEN: f32 = SQ * 8.0 + 8.0; // as tall as the board and its border
@@ -178,16 +180,19 @@ impl Rails {
             Mode::Rail => Some(Hit::Toggle),
             Mode::Open if inside(toggle) => Some(Hit::Toggle),
             Mode::Open if p == Panel::Look => {
-                // the list of looks: one row each, the whole width of the panel
-                let n = crate::pack::PACKS.len();
+                // two lists, one row each, the whole width of their half of the panel:
+                // the colours on the left, the pieces on the right
                 let w = Rails::width_of(p, Mode::Open);
-                let (top, row) = (LIST_TOP, ROW);
-                let i = ((y - top) / row).floor();
-                (0.0..=w)
-                    .contains(&x)
-                    .then_some(i)
-                    .filter(|i| *i >= 0.0 && (*i as usize) < n)
-                    .map(|i| Hit::Pick(i as usize))
+                let i = ((y - LIST_TOP) / ROW).floor();
+                if !(0.0..=w).contains(&x) || i < 0.0 {
+                    return None;
+                }
+                let i = i as usize;
+                if x < w / 2.0 {
+                    (i < crate::pack::PACKS.len()).then_some(Hit::Colours(i))
+                } else {
+                    (i <= crate::pack::piece_sets().len()).then_some(Hit::Pieces(i))
+                }
             }
             _ => None,
         }
@@ -205,7 +210,7 @@ impl Rails {
                 true
             }
             // picking a look changes the app's look, not the rails: the app does it
-            Some(Hit::Pick(_)) | None => false,
+            Some(Hit::Colours(_)) | Some(Hit::Pieces(_)) | None => false,
         }
     }
 
@@ -459,34 +464,62 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
             }
         }
         Panel::Look => {
-            txt.draw(cv, "r14", "Looks", 14.0, top + 28.0, th.muted);
-            for (i, name) in v.pack_names.iter().enumerate() {
+            // left: the colours (each pack's board, header and highlights)
+            // right: the pieces (each drawing, or the same as the colours' own)
+            let (c1, c2) = (14.0, 14.0 + COL_W + 14.0);
+            txt.draw(cv, "r14", "Colours", c1, top + 28.0, th.muted);
+            txt.draw(cv, "r14", "Pieces", c2, top + 28.0, th.muted);
+            let row = |cv: &mut Canvas<'_>,
+                       col: f32,
+                       i: usize,
+                       name: &str,
+                       chosen: bool,
+                       hovered: bool| {
                 let y = LIST_TOP + i as f32 * ROW + 17.0;
-                if hover == Some(Hit::Pick(i)) {
-                    // the pointer is on this look: the board shows it too, a click keeps it
+                if hovered {
+                    // the pointer is on this row: the board shows it too, a click keeps it
                     cv.rect(
-                        6.0,
+                        col - 8.0,
                         LIST_TOP + i as f32 * ROW + 1.0,
-                        w - 12.0,
+                        COL_W + 2.0,
                         ROW - 2.0,
                         th.half_typed,
                     );
-                    if i == v.pack {
-                        cv.rect(14.0, y - 14.0, 4.0, 18.0, th.accent); // still the chosen one
-                    }
-                    txt.draw(cv, "r16", name, 28.0, y, th.title);
-                    continue;
                 }
-                if i == v.pack {
-                    cv.rect(14.0, y - 14.0, 4.0, 18.0, th.accent);
-                    txt.draw(cv, "r16", name, 28.0, y, th.title);
+                if chosen {
+                    cv.rect(col, y - 14.0, 4.0, 18.0, th.accent);
+                }
+                if chosen || hovered {
+                    txt.draw(cv, "r16", name, col + 14.0, y, th.title);
                 } else {
-                    txt.draw(cv, "r14", name, 28.0, y, th.muted);
+                    txt.draw(cv, "r14", name, col + 14.0, y, th.muted);
                 }
+            };
+            for (i, name) in v.pack_names.iter().enumerate() {
+                let hovered = hover == Some(Hit::Colours(i));
+                row(cv, c1, i, name, i == v.pack, hovered);
             }
-            let mut y = LIST_TOP + v.pack_names.len() as f32 * ROW + 14.0;
-            txt.draw(cv, "r14", "Colours", 14.0, y + 14.0, th.muted);
-            y += 24.0;
+            row(
+                cv,
+                c2,
+                0,
+                "Same as colours",
+                v.pieces_row == 0,
+                hover == Some(Hit::Pieces(0)),
+            );
+            for (k, name) in v.piece_names.iter().enumerate() {
+                let i = k + 1;
+                row(
+                    cv,
+                    c2,
+                    i,
+                    name,
+                    i == v.pieces_row,
+                    hover == Some(Hit::Pieces(i)),
+                );
+            }
+            // under the colours list: the colours themselves
+            let y = LIST_TOP + v.pack_names.len().max(v.piece_names.len() + 1) as f32 * ROW + 20.0;
             let swatches = [
                 th.background,
                 th.light_square,
@@ -496,14 +529,11 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
                 th.text,
             ];
             for (i, c) in swatches.iter().enumerate() {
-                let sx = 14.0 + i as f32 * 28.0;
+                let sx = c1 + i as f32 * 28.0;
                 cv.rect(sx - 1.0, y - 1.0, 26.0, 26.0, th.muted);
                 cv.rect(sx, y, 24.0, 24.0, *c);
             }
-            y += 44.0;
-            txt.draw(cv, "r14", "Pieces", 14.0, y + 14.0, th.muted);
-            y += 24.0;
-            // every piece of the pack, white then black, on the board's two colours
+            // under the pieces list: every piece shown, white then black, on the board's two colours
             let order = [
                 Role::King,
                 Role::Queen,
@@ -512,11 +542,11 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
                 Role::Knight,
                 Role::Pawn,
             ];
-            for (row, side) in [Side::White, Side::Black].into_iter().enumerate() {
+            for (r, side) in [Side::White, Side::Black].into_iter().enumerate() {
                 for (i, role) in order.into_iter().enumerate() {
-                    let tx = 14.0 + i as f32 * 30.0;
-                    let ty = y + row as f32 * 30.0;
-                    let dark = (i + row) % 2 == 0;
+                    let tx = c2 + i as f32 * 30.0;
+                    let ty = y - 4.0 + r as f32 * 30.0;
+                    let dark = (i + r) % 2 == 0;
                     let sq = if dark {
                         th.dark_square
                     } else {
@@ -599,28 +629,40 @@ mod tests {
     }
 
     #[test]
-    fn each_look_in_the_list_is_picked_by_where_you_point() {
+    fn colours_and_pieces_are_picked_from_their_own_list_by_where_you_point() {
         let mut r = Rails::new();
         r.look = Mode::Open;
-        let n = crate::pack::PACKS.len();
-        // the middle of each row picks that look, anywhere across the panel
+        let (n, k) = (crate::pack::PACKS.len(), crate::pack::piece_sets().len());
+        let row = |i: usize| LIST_TOP + ROW * i as f32 + ROW / 2.0;
+        // the left half is the colours, a row each
         for i in 0..n {
-            let y = LIST_TOP + ROW * i as f32 + ROW / 2.0;
-            assert_eq!(r.hit(Panel::Look, 20.0, y), Some(Hit::Pick(i)), "row {i}");
-            assert_eq!(r.hit(Panel::Look, LOOK_W - 10.0, y), Some(Hit::Pick(i)));
+            assert_eq!(
+                r.hit(Panel::Look, 20.0, row(i)),
+                Some(Hit::Colours(i)),
+                "row {i}"
+            );
         }
-        // above the list and below it nothing is picked
+        assert_eq!(r.hit(Panel::Look, 20.0, row(n)), None, "below the colours");
+        // the right half is the pieces: row 0 follows the colours, then each piece set
+        for i in 0..=k {
+            assert_eq!(
+                r.hit(Panel::Look, LOOK_W - 20.0, row(i)),
+                Some(Hit::Pieces(i)),
+                "row {i}"
+            );
+        }
+        assert_eq!(r.hit(Panel::Look, LOOK_W - 20.0, row(k + 1)), None);
+        // above the lists nothing is picked
         assert_eq!(r.hit(Panel::Look, 20.0, LIST_TOP - 5.0), None);
-        assert_eq!(
-            r.hit(Panel::Look, 20.0, LIST_TOP + ROW * n as f32 + 5.0),
-            None
-        );
-        // the rails themselves don't change when a look is picked: the app does that
-        assert!(!r.click(Panel::Look, 20.0, LIST_TOP + 5.0));
+        // the rails themselves don't change when one is picked: the app does that
+        assert!(!r.click(Panel::Look, 20.0, row(1)));
+        assert!(!r.click(Panel::Look, LOOK_W - 20.0, row(1)));
         assert_eq!(r.look, Mode::Open);
-        // the Keys panel has no list
+        // the Keys panel has no lists
         r.keys = Mode::Open;
-        assert_eq!(r.hit(Panel::Keys, 20.0, LIST_TOP + 5.0), None);
+        assert_eq!(r.hit(Panel::Keys, 20.0, row(1)), None);
+        // twelve colours and eleven-ish piece sets fit in the panel
+        assert!(LIST_TOP + ROW * (n.max(k + 1) as f32) + 90.0 < LEN);
     }
 
     #[test]
@@ -704,6 +746,8 @@ mod tests {
                 rails: &rails,
                 pack: 0,
                 pack_names: &names,
+                piece_names: &names,
+                pieces_row: 0,
                 slide: None,
             };
             draw_panel(&mut Canvas::new(&mut px, w, h, scale), &view, p, hover);

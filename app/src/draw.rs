@@ -28,7 +28,9 @@ pub struct View<'a> {
     pub rails: &'a Rails,     // the thin side panels
     pub pack: usize,          // which look is in use
     pub pack_names: &'a [String],
-    pub slide: Option<f32>, // 0..1 while the last move's piece is sliding into place
+    pub piece_names: &'a [String], // the piece sets in the Pieces list (after "Same as colours")
+    pub pieces_row: usize,         // the row of the Pieces list in use (0 follows the colours)
+    pub slide: Option<f32>,        // 0..1 while the last move's piece is sliding into place
 }
 
 /// Where a square is drawn. The player's own pieces are at the bottom, so the
@@ -343,6 +345,8 @@ mod tests {
                 rails: &rails,
                 pack: i,
                 pack_names: &names,
+                piece_names: &names,
+                pieces_row: 0,
                 slide: None,
             };
             let mut cv = Canvas::new(&mut px, w, h, 2.0);
