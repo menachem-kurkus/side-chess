@@ -1,6 +1,6 @@
 # Side Chess
 
-Play chess against your AI assistant in a tiny window on Mac, Windows or Linux while your other sessions work. You play white; Claude Code or Codex plays black.
+Play chess against your AI assistant in a tiny window on Mac, Windows or Linux while your other sessions work. You play white by default and Claude Code or Codex plays black; press S in the window to swap, so you play black and the assistant plays white.
 
 Linux and Codex support are new in 0.2.2 and not yet tested in a real game; Mac and Windows with Claude Code are tested. Reports are welcome.
 
@@ -61,12 +61,12 @@ Codex finds the skill on its own when you open it in this repository. To use it 
 
 - Click a piece, then a square. Pawns promote to a queen.
 - Or type a square's letter and number, in either order (half a square tints its row or column), then the square to move to, then Enter. Typing another of your pieces switches to it; illegal squares are ignored. Esc clears.
-- Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, T switches the look (pack), P saves a screenshot.
+- Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, S swaps sides (you play black, the assistant plays white) and starts a new game, T switches the look (pack), P saves a screenshot.
 - The board shows the last move in gold, a king in check in red, and a banner for checkmate, stalemate or a draw. Pick a piece and faded dots show where it can go (a ring on a piece it can take). Castling (click the king, then g or c) and en passant work.
 
 ## How it works
 
-The app writes the position to `~/.side-chess/state.txt` after every move (on Windows `~` is `%USERPROFILE%`): whose turn (`turn: black (AI)` when it's the assistant's; apps before 0.2.2 said `black (Claude)`), FEN, the move list, black's legal moves and a text board. Claude Code writes its reply to `claude_move.txt`; Codex writes to `opponent_move.txt`. The app accepts either file and plays the move within a second. Any assistant that can read and write files can play the same way.
+The app writes the position to `~/.side-chess/state.txt` after every move (on Windows `~` is `%USERPROFILE%`): whose turn (`turn: black (AI)` or `turn: white (AI)` when it's the assistant's, `(player)` when it's yours; apps before 0.2.2 said `black (Claude)`), FEN, the move list, the legal moves for the side to move and a text board. Claude Code writes its reply to `claude_move.txt`; Codex writes to `opponent_move.txt`. The app accepts either file and plays the move within a second. Any assistant that can read and write files can play the same way.
 
 The move file can be plain UTF-8, UTF-8 with a byte-order mark, or UTF-16 (what Windows PowerShell 5 writes with `>`). An illegal move, or a file that isn't text, is removed and shows a note, and the app waits for another move rather than stalling. A file that is still empty is given two seconds for the move to arrive.
 

@@ -1,11 +1,11 @@
 ---
 name: side-chess
-description: Play black against the user in Side Chess, a tiny Mac, Windows or Linux chess window, or install it. Use when the user clicks Launch Side Chess, says they have begun a Side Chess game, or asks to play chess, install Side Chess, or watch the chess game.
+description: Play against the user in Side Chess, a tiny Mac, Windows or Linux chess window, or install it. Use when the user clicks Launch Side Chess, says they have begun a Side Chess game, or asks to play chess, install Side Chess, or watch the chess game.
 ---
 
 # Side Chess
 
-The user plays white in the Side Chess window. You play black by reading one file and writing another. Everything lives in `~/.side-chess/` (on Windows that is `%USERPROFILE%\.side-chess`, the same folder from Git Bash).
+The user plays white in the Side Chess window by default, and you play black; the user can press S to swap, so you play white and the user plays black. You play whichever side `state.txt` marks `(AI)`, by reading one file and writing another. Everything lives in `~/.side-chess/` (on Windows that is `%USERPROFILE%\.side-chess`, the same folder from Git Bash).
 
 ## Install or update
 
@@ -23,7 +23,7 @@ On Windows the script closes a running copy first. On a Mac, quit a running copy
 ## The files
 
 - `~/.side-chess/state.txt`, written by the app after every move:
-  - `turn:` is `white (player)`, `black (AI)` or `game over: ...` (apps before 0.2.2 say `black (Claude)`; treat any line starting `turn: black` as your turn)
+  - `turn:` is `white (player)`, `black (AI)`, `black (player)`, `white (AI)` or `game over: ...`. It is your turn whenever it says `(AI)` (apps before 0.2.2 say `black (Claude)`, also your turn). Before 0.3.0 you were always black; if the app is older than 0.3.0, play black and tell a user who wants to swap to update the app
   - `fen:`, `check:`, `moves:` (the game so far), `note:` (an error about your last move, if any)
   - `legal:` every legal move for the side to move, in standard notation
   - a text board (uppercase = white, lowercase = black)
@@ -38,14 +38,14 @@ Keep exactly one watch running. Start it with the Monitor tool (30 minute timeou
 F=~/.side-chess/state.txt; last=""
 while true; do
   t=$(head -1 "$F" 2>/dev/null); m=$(sed -n 4p "$F" 2>/dev/null); n=$(sed -n 5p "$F" 2>/dev/null)
-  if [[ "$t" != "turn: white (player)" && "$t$m$n" != "$last" ]]; then echo "$t | $m | $n"; last="$t$m$n"; fi
+  if [[ "$t" != *"(player)"* && "$t$m$n" != "$last" ]]; then echo "$t | $m | $n"; last="$t$m$n"; fi
   sleep 1
 done
 ```
 
 The `note:` part matters: when a move of yours is rejected the moves line does not change, only the note does, so without it the watch stays silent and the game stalls waiting for you. If an event arrives for a turn you already answered and its note is not empty, your move was refused: pick again from `legal:`.
 
-If Monitor isn't available, use a background Bash command that exits when the turn line starts with `turn: black`, and start it again after each move.
+If Monitor isn't available, use a background Bash command that exits when the turn line contains `(AI)`, and start it again after each move.
 
 ## Each of your turns
 
@@ -57,8 +57,8 @@ If Monitor isn't available, use a background Bash command that exits when the tu
 
 ## Game over
 
-When `turn:` starts with `game over:`, say the result in one line. Keep watching: the user presses N in the window for a new game, and the turn goes back to white.
+When `turn:` starts with `game over:`, say the result in one line. Keep watching: the user presses N in the window for a new game (same sides), or S to swap sides and start a new game. If the AI is white, you move first, so `turn:` is `white (AI)` straight away and the watch fires at once.
 
 ## Keys in the window (for the user)
 
-Click a piece then a square, or type a square's letter and number (either order; half a square tints its row or column), then the target square, then Enter. Esc clears, U takes back, N starts a new game, T switches the look (pack), P saves a screenshot.
+Click a piece then a square, or type a square's letter and number (either order; half a square tints its row or column), then the target square, then Enter. Esc clears, U takes back, N starts a new game, S swaps sides (you play black, the AI white) and starts a new game, T switches the look (pack), P saves a screenshot.

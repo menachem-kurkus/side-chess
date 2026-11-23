@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 
 // A "Launch Side Chess" button above the prompt. It opens the app and tells
-// this session the game has begun, so Claude plays black (see the side-chess skill).
+// this session the game has begun, so Claude plays the side marked (AI), black unless the user swaps with S (see the side-chess skill).
 export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => {
     if (e.props.hasSurvey) {
@@ -36,7 +36,7 @@ export const register: Register = on => {
         ]))
       if (opened) {
         void $.prompt.submit({
-          text: 'I have begun a Side Chess game. Use the side-chess skill and play black.',
+          text: 'I have begun a Side Chess game. Use the side-chess skill and play black (or whichever side the app marks as AI if the user swaps with S).',
         })
         return
       }
@@ -45,7 +45,7 @@ export const register: Register = on => {
         text:
           'Side Chess is not installed yet. Use the side-chess skill: install it with ' +
           `bash "${root}/app/install.sh" on a Mac or Linux, or ` +
-          `powershell -ExecutionPolicy Bypass -File "${root}/app/install.ps1" on Windows, open it, then play black.`,
+          `powershell -ExecutionPolicy Bypass -File "${root}/app/install.ps1" on Windows, open it, then play black (or whichever side the app marks as AI if the user swaps with S).`,
       })
     }
 
