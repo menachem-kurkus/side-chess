@@ -21,7 +21,7 @@ pub struct View<'a> {
     pub txt: &'a Txt,
     pub kb_file: Option<u32>, // half-typed square: the letter so far
     pub kb_rank: Option<u32>, // half-typed square: the number so far
-    pub thinking_dots: usize, // 1..=3, animates "Claude is thinking"
+    pub thinking_dots: usize, // 1..=3, animates the opponent's thinking status
     pub show_pack_name: bool, // for two seconds after T
 }
 
@@ -69,7 +69,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             th.status_your_move,
         ),
         None => (
-            format!("Claude is thinking{}", ".".repeat(v.thinking_dots)),
+            format!("AI is thinking{}", ".".repeat(v.thinking_dots)),
             th.status_waiting,
         ),
     };
@@ -204,7 +204,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         txt.draw(cv, "r14", again, center("r14", again), by + 126.0, th.muted);
     }
 
-    // Footer: the last few moves, any note about Claude's move, the pack name after T
+    // Footer: the last few moves, any note about the AI move, the pack name after T
     let fy = BY + SQ * 8.0 + 36.0;
     let moves = if g.sans.is_empty() {
         "No moves yet.".to_string()

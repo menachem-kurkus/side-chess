@@ -1,10 +1,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
-//! Side Chess: you play white in this window; a Claude Code session plays black
+//! Side Chess: you play white in this window; an AI session plays black
 //! by reading ~/.side-chess/state.txt and writing its move to
-//! ~/.side-chess/claude_move.txt.
+//! ~/.side-chess/opponent_move.txt or the legacy claude_move.txt.
 //!
 //! Where things live:
-//!   game.rs   rules, typed and clicked moves, the files shared with Claude
+//!   game.rs   rules, typed and clicked moves, the files shared with the AI
 //!   draw.rs   what the window shows (layout)
 //!   pack.rs   the look: colours and pieces from app/packs/<pack>/
 //!   text.rs   text from a baked atlas
@@ -21,7 +21,9 @@ mod text;
 
 use canvas::{Canvas, Img};
 use draw::{square_at, View, H, SQ, W};
-use game::{check_claude_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game};
+use game::{
+    check_opponent_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game,
+};
 use pack::{load_pack, load_pack_for, saved_pack, Theme, PACKS};
 use present::{Presenter, Screen};
 use shakmaty::{fen::Fen, Chess, Color as Side, Position};
@@ -40,7 +42,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-/// How often the app looks for Claude's move and a screenshot request.
+/// How often the app looks for the opponent's move and a screenshot request.
 const POLL: Duration = Duration::from_millis(250);
 
 struct App {
@@ -83,6 +85,7 @@ impl App {
             g.selected = sqr.parse().ok();
         }
         let _ = fs::remove_file(live_dir().join("claude_move.txt"));
+        let _ = fs::remove_file(live_dir().join("opponent_move.txt"));
         write_state(&g);
         App {
             window: None,
@@ -314,10 +317,10 @@ impl ApplicationHandler for App {
         }
     }
 
-    // Between events: look for Claude's move, a screenshot request, and time-based changes.
+    // Between events: look for the opponent's move, a screenshot request, and time-based changes.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         let before = (self.g.sans.len(), self.g.note.clone());
-        check_claude_move(&mut self.g);
+        check_opponent_move(&mut self.g);
         if (self.g.sans.len(), self.g.note.clone()) != before {
             self.dirty = true;
         }
@@ -351,7 +354,56 @@ impl ApplicationHandler for App {
     }
 }
 
+/// On Linux the window system loads the keyboard library (libxkbcommon) at run
+/// time and crashes without a clear message if it's missing, so check first.
+#[cfg(target_os = "linux")]
+fn check_linux_libraries() {
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let (lib, pkg) = if wayland {
+        (
+            "libxkbcommon.so.0",
+            "libxkbcommon0 (Debian, Ubuntu) or libxkbcommon (Fedora, Arch)",
+        )
+    } else {
+        (
+            "libxkbcommon-x11.so.0",
+            "libxkbcommon-x11-0 (Debian, Ubuntu) or libxkbcommon-x11 (Fedora, Arch)",
+        )
+    };
+    let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("LD_LIBRARY_PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    for d in [
+        "/lib",
+        "/lib64",
+        "/usr/lib",
+        "/usr/lib64",
+        "/usr/local/lib",
+        "/lib/x86_64-linux-gnu",
+        "/usr/lib/x86_64-linux-gnu",
+        "/lib/aarch64-linux-gnu",
+        "/usr/lib/aarch64-linux-gnu",
+    ] {
+        dirs.push(d.into());
+    }
+    if dirs.iter().any(|d| d.join(lib).exists()) {
+        return;
+    }
+    // Not in the usual folders: ask the loader's cache. If that can't be read
+    // either, carry on rather than refuse a setup we don't know.
+    let Ok(out) = std::process::Command::new("ldconfig").arg("-p").output() else {
+        return;
+    };
+    if !out.status.success() || String::from_utf8_lossy(&out.stdout).contains(lib) {
+        return;
+    }
+    eprintln!("Side Chess can't start: {lib} is missing. Install the package {pkg}, then open Side Chess again.");
+    std::process::exit(1);
+}
+
 fn main() {
+    #[cfg(target_os = "linux")]
+    check_linux_libraries();
     let el = EventLoop::new().expect("an event loop");
     let mut app = App::new();
     el.run_app(&mut app).expect("the app runs");

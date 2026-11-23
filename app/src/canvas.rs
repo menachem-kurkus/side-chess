@@ -1,5 +1,5 @@
 //! A drawing surface in plain memory: filled rectangles, outlines and images.
-//! No graphics card is used, which keeps the app small on any Mac or Windows PC. The canvas
+//! No graphics card is used, which keeps the app small on any Mac, Windows or Linux PC. The canvas
 //! draws straight into the window's own pixel buffer (it keeps no copy of its
 //! own), so all drawing happens while the window is being redrawn.
 //! Coordinates are in window points; the canvas multiplies by the screen's
@@ -335,7 +335,7 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    /// Saves the canvas as a PNG (the P key, or a `shot` file from Claude),
+    /// Saves the canvas as a PNG (the P key, or a `shot` file from an AI session),
     /// with the screen's colour profile (`icc`) so viewers show the right colours.
     pub fn save_png(&self, path: &std::path::Path, icc: Option<Vec<u8>>) -> std::io::Result<()> {
         let file = std::fs::File::create(path)?;
