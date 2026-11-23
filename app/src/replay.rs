@@ -539,4 +539,36 @@ mod tests {
             assert!(r.total() >= 14, "game {} has its moves", n + 1);
         }
     }
+
+    /// With a real Stockfish installed: rate a short game and check the scores are sane.
+    /// Run by hand: cargo test real_stockfish -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_stockfish_rates_a_game() {
+        let Some(path) = engine::find_engine() else {
+            panic!("no Stockfish found");
+        };
+        // 1.f3 e5 2.g4 Qh4# : white's first two moves are blunders-in-waiting
+        let p = parse_pgn("1. f3 e5 2. g4 Qh4# 0-1").unwrap();
+        let mut r = Run::new(&p, String::new());
+        r.start_analysis(path);
+        let start = std::time::Instant::now();
+        while r.analysed() < r.evals.len() && start.elapsed().as_secs() < 60 {
+            r.poll();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(r.analysed(), 5, "all five positions scored");
+        for i in 1..=4 {
+            println!(
+                "move {i}: {:?} eval {:?}",
+                r.grade_at(i),
+                r.evals[i].as_ref().map(|e| e.text())
+            );
+        }
+        assert_eq!(
+            r.grade_at(3).map(|g| g.0),
+            Some(Grade::Blunder),
+            "2.g4 allows mate"
+        );
+    }
 }
