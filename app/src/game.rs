@@ -20,6 +20,8 @@ pub struct Game {
     pub target: Option<Square>, // keyboard: square offered for the selected piece, played on Enter
     pub last: Option<(Square, Square)>,
     pub note: String,
+    pub promotion: Option<(Square, Square)>, // a pawn's last step waiting for the piece the person picks
+    pub saved: Option<(PathBuf, usize)>, // the file this game was saved to, and how many moves it had then
     pub hint: String, // shown in the window only, never in state.txt (a non-empty `note:` there makes the AI think its move was refused)
 }
 
@@ -40,6 +42,8 @@ impl Game {
             target: None,
             last: None,
             note: String::new(),
+            promotion: None,
+            saved: None,
             hint: String::new(),
         }
     }
@@ -57,7 +61,51 @@ impl Game {
         }
     }
 
+    /// A move the person has chosen. A pawn reaching the last rank waits for the
+    /// piece to be picked (see `promote`); anything else is played at once.
+    pub fn try_move(&mut self, from: Square, to: Square) -> MoveStart {
+        let moves: Vec<Move> = self
+            .pos
+            .legal_moves()
+            .into_iter()
+            .filter(|m| m.from() == Some(from) && shown_to(m) == to)
+            .collect();
+        if moves.iter().any(|m| m.promotion().is_some()) {
+            self.promotion = Some((from, to));
+            self.target = None;
+            MoveStart::NeedPromotion
+        } else if let Some(m) = moves.first() {
+            self.play(m);
+            MoveStart::Played
+        } else {
+            MoveStart::Illegal
+        }
+    }
+
+    /// The person picked the piece for the waiting pawn move: queen, rook, bishop or knight.
+    pub fn promote(&mut self, role: Role) -> bool {
+        let Some((from, to)) = self.promotion.take() else {
+            return false;
+        };
+        let m =
+            self.pos.legal_moves().into_iter().find(|m| {
+                m.from() == Some(from) && shown_to(m) == to && m.promotion() == Some(role)
+            });
+        match m {
+            Some(m) => {
+                self.play(&m);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn cancel_promotion(&mut self) {
+        self.promotion = None;
+    }
+
     pub fn play(&mut self, m: &Move) {
+        self.promotion = None;
         let san = San::from_move(&self.pos, m).to_string();
         self.history.push((self.pos.clone(), self.last));
         self.pos = self.pos.clone().play(m).expect("legal move");
@@ -72,6 +120,7 @@ impl Game {
 
     // Take back to the last time it was the player's move
     pub fn undo(&mut self) {
+        self.promotion = None;
         while let Some((p, l)) = self.history.pop() {
             self.pos = p;
             self.last = l;
@@ -84,6 +133,14 @@ impl Game {
         self.target = None;
         write_state(self);
     }
+}
+
+/// What came of a move the person chose.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MoveStart {
+    Played,
+    NeedPromotion, // a pawn on its last step: waiting for queen, rook, bishop or knight
+    Illegal,
 }
 
 pub fn queen_or_plain(m: &Move) -> bool {
@@ -682,5 +739,47 @@ mod tests {
         over.swap_sides();
         assert_eq!(over.player, Side::Black);
         assert!(over.sans.is_empty());
+    }
+
+    #[test]
+    fn a_pawn_on_its_last_step_waits_for_the_piece_you_pick() {
+        for (role, san) in [
+            (Role::Queen, "e8=Q"),
+            (Role::Rook, "e8=R"),
+            (Role::Bishop, "e8=B"),
+            (Role::Knight, "e8=N"),
+        ] {
+            let mut g = from_fen("8/4P1k1/8/8/8/8/8/4K3 w - - 0 1");
+            assert_eq!(g.try_move(s("e7"), s("e8")), MoveStart::NeedPromotion);
+            assert!(
+                g.sans.is_empty(),
+                "nothing is played until a piece is picked"
+            );
+            assert_eq!(g.promotion, Some((s("e7"), s("e8"))));
+            assert!(g.promote(role));
+            assert_eq!(g.sans.last().map(String::as_str), Some(san), "{role:?}");
+            assert_eq!(g.pos.board().piece_at(s("e8")).map(|p| p.role), Some(role));
+            assert!(g.promotion.is_none());
+        }
+        // changing your mind: nothing is played
+        let mut g = from_fen("8/4P1k1/8/8/8/8/8/4K3 w - - 0 1");
+        g.try_move(s("e7"), s("e8"));
+        g.cancel_promotion();
+        assert!(g.promotion.is_none() && g.sans.is_empty());
+        // ordinary moves are played straight away, bad ones refused
+        assert_eq!(g.try_move(s("e1"), s("e2")), MoveStart::Played);
+        let mut h = from_fen("8/4P1k1/8/8/8/8/8/4K3 w - - 0 1");
+        assert_eq!(h.try_move(s("e7"), s("e6")), MoveStart::Illegal);
+        assert!(h.promote(Role::Queen) == false, "nothing is waiting");
+        // the opponent's replies still name the piece themselves
+        let b = from_fen("4k3/8/8/8/8/8/4p3/7K b - - 0 1");
+        assert_eq!(
+            parse_move(&b.pos, "e2e1n").and_then(|m| m.promotion()),
+            Some(Role::Knight)
+        );
+        assert_eq!(
+            parse_move(&b.pos, "e1=R").and_then(|m| m.promotion()),
+            Some(Role::Rook)
+        );
     }
 }

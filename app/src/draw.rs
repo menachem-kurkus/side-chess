@@ -31,10 +31,43 @@ pub struct View<'a> {
     pub piece_names: &'a [String], // the piece sets in the Pieces list (after "Same as colours")
     pub pieces_row: usize,         // the row of the Pieces list in use (0 follows the colours)
     pub slide: Option<f32>,        // 0..1 while the last move's piece is sliding into place
+    pub arrows: bool,              // X: arrows from every attacker to what it attacks
+    pub replay: Option<&'a crate::replay::State>, // a saved game's list or a game being replayed
 }
 
 /// Where a square is drawn. The player's own pieces are at the bottom, so the
 /// board is turned round when the player has black (`flip`).
+// The box that asks which piece a pawn becomes: four tiles in a row over the board
+const PROMO_TILE: f32 = 68.0;
+const PROMO_GAP: f32 = 14.0;
+const PROMO_PAD: f32 = 24.0;
+const PROMO_W: f32 = PROMO_PAD * 2.0 + PROMO_TILE * 4.0 + PROMO_GAP * 3.0;
+const PROMO_H: f32 = 172.0;
+const PROMO_ROLES: [(Role, &str); 4] = [
+    (Role::Queen, "Q"),
+    (Role::Rook, "R"),
+    (Role::Bishop, "B"),
+    (Role::Knight, "N"),
+];
+
+fn promo_origin() -> (f32, f32) {
+    (
+        BX + (SQ * 8.0 - PROMO_W) / 2.0,
+        BY + (SQ * 8.0 - PROMO_H) / 2.0,
+    )
+}
+
+/// The piece under a point in the promotion box, if any.
+pub fn promotion_at(x: f32, y: f32) -> Option<Role> {
+    let (ox, oy) = promo_origin();
+    PROMO_ROLES.iter().enumerate().find_map(|(i, (role, _))| {
+        let tx = ox + PROMO_PAD + i as f32 * (PROMO_TILE + PROMO_GAP);
+        let ty = oy + 58.0;
+        ((tx..=tx + PROMO_TILE).contains(&x) && (ty..=ty + PROMO_TILE).contains(&y))
+            .then_some(*role)
+    })
+}
+
 pub fn square_xy(s: Square, flip: bool) -> (f32, f32) {
     let f = u32::from(s.file()) as f32;
     let r = u32::from(s.rank()) as f32;
@@ -73,6 +106,9 @@ pub fn piece_tile(role: Role, side: Side) -> (f32, f32) {
 
 pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     let (th, txt) = (v.th, v.txt);
+    // in a replay the board shows the replayed game instead of the live one
+    let run = v.replay.and_then(|r| r.run.as_ref());
+    let g = run.map_or(g, |r| &r.view);
     let flip = g.player == Side::Black;
 
     // The window is one flat colour; the header is a blended band across the top
@@ -87,6 +123,20 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     txt.draw(cv, "b30", "Chess", BX + 18.0, 51.0, on_band);
     // the status sits in a capsule: gold-accent when it is your move, quiet otherwise
     let (status, capsule) = match game_over(&g.pos, g.player) {
+        _ if run.is_some() => (
+            run.map_or(String::new(), |r| {
+                if r.idx == 0 {
+                    "Replay: start".to_string()
+                } else {
+                    format!(
+                        "Replay: move {} of {}",
+                        r.idx.div_ceil(2),
+                        r.total().div_ceil(2)
+                    )
+                }
+            }),
+            band0.mix(on_band, 0.78),
+        ),
         Some(_) => ("Game over".to_string(), band0.mix(on_band, 0.78)),
         None if g.pos.turn() == g.player => (
             if g.pos.is_check() {
@@ -226,8 +276,68 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         }
     }
 
+    // A pawn on its last step: ask which piece it becomes
+    if g.promotion.is_some() {
+        cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
+        let (ox, oy) = promo_origin();
+        cv.shadow(ox, oy, PROMO_W, PROMO_H, 6);
+        cv.rrect(ox, oy, PROMO_W, PROMO_H, 12.0, th.accent);
+        cv.rrect(ox, oy + 6.0, PROMO_W, PROMO_H - 6.0, 12.0, th.banner);
+        txt.draw(
+            cv,
+            "b18",
+            "Become which piece?",
+            ox + PROMO_PAD,
+            oy + 40.0,
+            th.banner_title,
+        );
+        for (i, (role, letter)) in PROMO_ROLES.iter().enumerate() {
+            let tx = ox + PROMO_PAD + i as f32 * (PROMO_TILE + PROMO_GAP);
+            let ty = oy + 58.0;
+            cv.rect(
+                tx,
+                ty,
+                PROMO_TILE,
+                PROMO_TILE,
+                if i % 2 == 0 {
+                    th.light_square
+                } else {
+                    th.dark_square
+                },
+            );
+            cv.rect_lines(tx, ty, PROMO_TILE, PROMO_TILE, 2.0, th.board_border);
+            let (sx, sy) = piece_tile(*role, g.player);
+            let k = v.tile / 128.0;
+            cv.image(
+                v.pieces,
+                (sx * k, sy * k, v.tile, v.tile),
+                (tx + 2.0, ty + 2.0, PROMO_TILE - 4.0, PROMO_TILE - 4.0),
+                None,
+            );
+            let lw = txt.width("b11", letter);
+            txt.draw(
+                cv,
+                "b11",
+                letter,
+                tx + (PROMO_TILE - lw) / 2.0,
+                ty + PROMO_TILE + 20.0,
+                th.muted,
+            );
+        }
+    }
+
+    // Threat arrows: from each attacking piece to each enemy piece it attacks
+    if v.arrows {
+        draw_threats(cv, g, v, flip);
+    }
+
+    // The engine's view in a replay: the bar, a mark on a weak move, the best move
+    if let Some(r) = run {
+        draw_engine(cv, g, v, r, flip);
+    }
+
     // Game over: banner across the board
-    if let Some(msg) = game_over(&g.pos, g.player) {
+    if let Some(msg) = game_over(&g.pos, g.player).filter(|_| run.is_none()) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
         let (bw, bh) = (380.0, 150.0);
         let (bx, by) = (BX + (SQ * 8.0 - bw) / 2.0, BY + (SQ * 8.0 - bh) / 2.0);
@@ -263,13 +373,56 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     } else {
         let all = move_list(&g.sans);
         let parts: Vec<&str> = all.split("  ").collect();
-        parts[parts.len().saturating_sub(5)..].join("    ")
+        let keep = if run.is_some_and(|r| r.analysing()) {
+            4
+        } else {
+            5
+        };
+        parts[parts.len().saturating_sub(keep)..].join("    ")
     };
     txt.draw(cv, "r16", &moves, BX, fy, th.text);
-    if !g.note.is_empty() {
+    if let Some(r) = run {
+        // what the engine made of the move just played, else the date of the game
+        let verdict = match (r.idx, r.grade_at(r.idx), g.sans.last()) {
+            (1.., Some((grade, l)), Some(san)) if grade != crate::engine::Grade::Fine => {
+                format!(
+                    "{san}: {} (cost {:.1} pawns).",
+                    grade.word(),
+                    l as f32 / 100.0
+                )
+            }
+            (1.., Some(_), Some(san)) => format!("{san}: fine."),
+            _ => format!("{}.", r.title),
+        };
+        let keys = if !r.analysing() {
+            "Left / Right step, Esc leaves.".to_string()
+        } else if r.analysed() < r.evals.len() {
+            format!("Rating {} of {}...", r.analysed(), r.evals.len())
+        } else {
+            "Up / Down: marked moves. Esc leaves.".to_string()
+        };
+        let help = format!("{verdict}  {keys}");
+        txt.draw(cv, "r14", &help, BX, fy + 24.0, th.muted);
+        if let Some(e) = r.eval_here() {
+            let t = e.text();
+            txt.draw(cv, "b18", &t, W - BX - txt.width("b18", &t), fy, th.text);
+        }
+    } else if !g.note.is_empty() {
         txt.draw(cv, "r14", &g.note, BX, fy + 24.0, th.error);
     } else if !g.hint.is_empty() {
         txt.draw(cv, "r14", &g.hint, BX, fy + 24.0, th.error);
+    }
+    if let Some(pk) = v
+        .replay
+        .and_then(|r| r.picker.as_ref().map(|p| (p, &r.error)))
+    {
+        draw_picker(
+            cv,
+            v,
+            pk.0,
+            pk.1.as_deref(),
+            v.replay.is_some_and(|r| r.engine_found),
+        );
     }
     if v.show_pack_name {
         txt.draw(
@@ -281,6 +434,181 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             th.muted,
         );
     }
+}
+
+/// The evaluation bar beside the board, a mark on the last move when it was weak,
+/// and an arrow for the engine's move in the position shown.
+fn draw_engine(cv: &mut Canvas<'_>, g: &Game, v: &View, r: &crate::replay::Run, flip: bool) {
+    let th = v.th;
+    let Some(e) = r.eval_here() else { return };
+    // the bar: white's share rises from white's side of the board
+    let (bx, bw, by, bh) = (7.0, 12.0, BY, SQ * 8.0);
+    let share = 1.0 / (1.0 + (-(e.cp as f32) / 300.0).exp()); // 0.5 when level, near 1 when winning
+    let white_h = bh * share;
+    cv.rect(bx, by, bw, bh, th.board_border);
+    if flip {
+        cv.rect(bx, by, bw, white_h, th.light_square);
+    } else {
+        cv.rect(bx, by + bh - white_h, bw, white_h, th.light_square);
+    }
+    cv.rect(bx, by + bh / 2.0 - 0.5, bw, 1.0, th.accent);
+    // a weak move gets a small badge on the square it moved to
+    if let (Some((grade, _)), Some((_, to))) = (r.grade_at(r.idx), g.last) {
+        if grade != crate::engine::Grade::Fine {
+            let colour = if grade == crate::engine::Grade::Inaccuracy {
+                th.status_over
+            } else {
+                th.error
+            };
+            let (x, y) = square_xy(to, flip);
+            let mark = grade.mark();
+            let w = v.txt.width("b11", mark) + 10.0;
+            cv.rrect(x + SQ - w - 2.0, y + 2.0, w, 18.0, 9.0, colour);
+            v.txt.draw(
+                cv,
+                "b11",
+                mark,
+                x + SQ - w + 3.0,
+                y + 15.0,
+                colour.ink(th.light_square, th.board_border),
+            );
+        }
+    }
+    // the engine's move, as an arrow in the look's accent
+    if let (Some((from, to)), None) = (e.best, game_over(&g.pos, g.player)) {
+        let (fx, fy) = square_xy(from, flip);
+        let (tx, ty) = square_xy(to, flip);
+        let half = SQ / 2.0;
+        cv.arrow(
+            (fx + half, fy + half),
+            (tx + half, ty + half),
+            8.0,
+            20.0,
+            Color {
+                a: 0.8,
+                ..th.accent
+            },
+        );
+    }
+}
+
+/// One arrow per attack: white's and black's in the pack's own colours, and a stronger,
+/// thicker one where the target is undefended or worth more than the attacker.
+fn draw_threats(cv: &mut Canvas<'_>, g: &Game, v: &View, flip: bool) {
+    let th = v.th;
+    for t in crate::threats::threats(&g.pos) {
+        let side = if t.by == Side::White {
+            th.status_your_move
+        } else {
+            th.status_over
+        };
+        let (c, w) = if t.strong {
+            (
+                Color {
+                    a: 0.92,
+                    ..side.mix(th.error, 0.45)
+                },
+                9.0,
+            )
+        } else {
+            (Color { a: 0.55, ..side }, 6.0)
+        };
+        let (fx, fy) = square_xy(t.from, flip);
+        let (tx, ty) = square_xy(t.to, flip);
+        let half = SQ / 2.0;
+        // start a little out from the attacker's centre and stop at the target's
+        let (dx, dy) = (tx - fx, ty - fy);
+        let n = dx.hypot(dy).max(1.0);
+        let (ux, uy) = (dx / n, dy / n);
+        cv.arrow(
+            (fx + half + ux * 14.0, fy + half + uy * 14.0),
+            (tx + half - ux * 8.0, ty + half - uy * 8.0),
+            w,
+            w * 2.4,
+            c,
+        );
+    }
+}
+
+/// The list of saved games over the board: aligned columns, the chosen row in the accent.
+fn draw_picker(
+    cv: &mut Canvas<'_>,
+    v: &View,
+    pk: &crate::replay::Picker,
+    error: Option<&str>,
+    engine_found: bool,
+) {
+    let (th, txt) = (v.th, v.txt);
+    cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
+    let (bw, row) = (SQ * 8.0 - 40.0, 30.0);
+    let bh = 138.0 + row * crate::replay::ROWS as f32;
+    let (bx, by) = (BX + 20.0, BY + (SQ * 8.0 - bh) / 2.0);
+    cv.shadow(bx, by, bw, bh, 6);
+    cv.rrect(bx, by, bw, bh, 12.0, th.accent);
+    cv.rrect(bx, by + 6.0, bw, bh - 6.0, 12.0, th.banner);
+    txt.draw(
+        cv,
+        "b18",
+        "Saved games",
+        bx + 20.0,
+        by + 40.0,
+        th.banner_title,
+    );
+    if pk.entries.is_empty() {
+        let lines = [
+            "No saved games yet.",
+            "A game of five moves or more is saved when it ends,",
+            "when you press N, and when you quit.",
+        ];
+        for (i, l) in lines.iter().enumerate() {
+            txt.draw(
+                cv,
+                "r16",
+                l,
+                bx + 20.0,
+                by + 80.0 + 26.0 * i as f32,
+                th.banner_result,
+            );
+        }
+    }
+    let xs = [20.0, 170.0, 250.0, 370.0]; // the columns
+    let ink = th.accent.ink(th.background, th.text);
+    for (i, e) in pk
+        .entries
+        .iter()
+        .enumerate()
+        .skip(pk.top)
+        .take(crate::replay::ROWS)
+    {
+        let y = by + 60.0 + row * (i - pk.top) as f32;
+        let chosen = i == pk.sel;
+        if chosen {
+            cv.rrect(bx + 10.0, y, bw - 20.0, row - 2.0, 8.0, th.accent);
+        }
+        for (c, t) in e.cols.iter().enumerate() {
+            let colour = if chosen { ink } else { th.banner_result };
+            txt.draw(cv, "r16", t, bx + xs[c], y + 20.0, colour);
+        }
+    }
+    if !engine_found {
+        let lines = [
+            "To rate the moves, install Stockfish (free). Put it on your PATH",
+            "or in ~/.side-chess/engine/. Replays work without it.",
+        ];
+        for (i, l) in lines.iter().enumerate() {
+            txt.draw(
+                cv,
+                "r14",
+                l,
+                bx + 20.0,
+                by + bh - 62.0 + 18.0 * i as f32,
+                th.muted,
+            );
+        }
+    }
+    let foot = error.unwrap_or("Up / Down choose, Enter opens, Esc closes.");
+    let colour = if error.is_some() { th.error } else { th.muted };
+    txt.draw(cv, "r14", foot, bx + 20.0, by + bh - 16.0, colour);
 }
 
 #[cfg(test)]
@@ -348,11 +676,27 @@ mod tests {
                 piece_names: &names,
                 pieces_row: 0,
                 slide: None,
+                replay: None,
+                arrows: false,
             };
             let mut cv = Canvas::new(&mut px, w, h, 2.0);
             frame(&mut cv, &g, &v);
             cv.save_png(std::path::Path::new(&format!("/tmp/look-{id}.png")), None)
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn each_piece_in_the_promotion_box_is_picked_by_where_you_point() {
+        let (ox, oy) = promo_origin();
+        for (i, (role, _)) in PROMO_ROLES.iter().enumerate() {
+            let x = ox + PROMO_PAD + i as f32 * (PROMO_TILE + PROMO_GAP) + PROMO_TILE / 2.0;
+            assert_eq!(promotion_at(x, oy + 58.0 + PROMO_TILE / 2.0), Some(*role));
+        }
+        // between tiles, above them, and outside the box: nothing
+        let gap_x = ox + PROMO_PAD + PROMO_TILE + PROMO_GAP / 2.0;
+        assert_eq!(promotion_at(gap_x, oy + 90.0), None);
+        assert_eq!(promotion_at(ox + 40.0, oy + 10.0), None);
+        assert_eq!(promotion_at(5.0, 5.0), None);
     }
 }

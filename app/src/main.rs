@@ -13,25 +13,29 @@
 //!   main.rs   the window, keys and mouse (this file)
 mod canvas;
 mod draw;
+mod engine;
 mod game;
 mod native;
 mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
 mod present;
 mod rails;
+mod replay;
+mod save;
 mod text;
+mod threats;
 
 use canvas::{Canvas, Img};
-use draw::{square_at, View, H, SQ, W};
+use draw::{promotion_at, square_at, View, H, SQ, W};
 use game::{
-    check_opponent_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game,
+    check_opponent_move, game_over, live_dir, pick_square, sq, write_state, Game, MoveStart,
 };
 use pack::{
     load_look_for, load_pack, piece_sets, save_pieces, saved_pack, saved_pieces, Theme, PACKS,
 };
 use present::{Presenter, Screen};
 use rails::{Hit, Mode, Panel, Rails, LEN, TOP};
-use shakmaty::{fen::Fen, Chess, Color as Side, Position};
+use shakmaty::{fen::Fen, Chess, Color as Side, Position, Role};
 use std::{
     fs,
     rc::Rc,
@@ -81,6 +85,8 @@ struct App {
     dots: usize,
     dirty: bool,
     shot: bool,
+    replay: replay::State,
+    arrows: bool, // X: threat arrows are on
     rails: Rails,
     rail_wins: Vec<RailWin>,
     preview: Option<usize>, // a look the pointer is on in the Look list, shown until it leaves
@@ -134,6 +140,8 @@ impl App {
             dots: 1,
             dirty: true,
             shot: false,
+            replay: replay::State::default(),
+            arrows: false,
             rails: Rails::load(),
             rail_wins: vec![],
             native_seen: None,
@@ -354,6 +362,8 @@ impl App {
             piece_names: &self.piece_names,
             pieces_row: self.pieces_row(),
             slide: None,
+            arrows: false,
+            replay: None,
         };
         rw.presenter.frame(w, h, scale, screen, |px| {
             let mut cv = Canvas::new(px, w, h, scale as f32);
@@ -361,11 +371,31 @@ impl App {
         });
     }
 
+    /// Keep the game on disk once it is over (see save.rs for the rules).
+    fn autosave(&mut self) {
+        if game_over(&self.g.pos, self.g.player).is_some() {
+            save::save(&mut self.g);
+        }
+    }
+
     fn my_turn(&self) -> bool {
         self.g.pos.turn() == self.g.player && game_over(&self.g.pos, self.g.player).is_none()
     }
 
     fn click(&mut self) {
+        if self.replay.active() {
+            return;
+        }
+        if self.g.promotion.is_some() {
+            // the box asking which piece the pawn becomes: pick one, or click away to cancel
+            match promotion_at(self.mouse.0, self.mouse.1) {
+                Some(role) => {
+                    self.g.promote(role);
+                }
+                None => self.g.cancel_promotion(),
+            }
+            return;
+        }
         if !self.my_turn() {
             return;
         }
@@ -374,8 +404,9 @@ impl App {
             return;
         };
         let g = &mut self.g;
-        if let Some(m) = g.selected.and_then(|from| legal_to(&g.pos, from, clicked)) {
-            g.play(&m);
+        let started = g.selected.map(|from| g.try_move(from, clicked));
+        if matches!(started, Some(MoveStart::Played | MoveStart::NeedPromotion)) {
+            // played, or waiting for the piece to be picked
         } else if g.pos.board().piece_at(clicked).map(|p| p.color) == Some(g.player) {
             g.target = None;
             g.selected = if g.selected == Some(clicked) {
@@ -390,14 +421,38 @@ impl App {
     }
 
     fn key(&mut self, key: &Key, el: &ActiveEventLoop) {
+        if self.replay.active() {
+            self.replay_key(key, el);
+            self.dirty = true;
+            return;
+        }
+        // While the box asks which piece a pawn becomes, Q R B N pick, Esc cancels
+        if self.g.promotion.is_some() && !self.mods.super_key() && !self.mods.control_key() {
+            match key {
+                Key::Character(s) => {
+                    let role = match s.chars().next().map(|c| c.to_ascii_lowercase()) {
+                        Some('q') => Some(Role::Queen),
+                        Some('r') => Some(Role::Rook),
+                        Some('b') => Some(Role::Bishop),
+                        Some('n') => Some(Role::Knight),
+                        _ => None,
+                    };
+                    if let Some(role) = role {
+                        self.g.promote(role);
+                    }
+                }
+                Key::Named(NamedKey::Escape) => self.g.cancel_promotion(),
+                _ => {}
+            }
+            self.dirty = true;
+            return;
+        }
         match key {
             Key::Named(NamedKey::Enter) => {
                 if let (true, Some(from), Some(to)) =
                     (self.my_turn(), self.g.selected, self.g.target)
                 {
-                    if let Some(m) = legal_to(&self.g.pos, from, to) {
-                        self.g.play(&m);
-                    }
+                    self.g.try_move(from, to);
                 }
             }
             Key::Named(NamedKey::Escape) => {
@@ -422,14 +477,22 @@ impl App {
                         f @ 'a'..='h' => self.kb_file = Some(f as u32 - 'a' as u32),
                         r @ '1'..='8' => self.kb_rank = Some(r as u32 - '1' as u32),
                         'n' => {
+                            save::save(&mut self.g);
                             self.g = Game::new_as(self.g.player);
                             write_state(&self.g);
                         }
                         // swap sides: only between games (refused mid-game: press N first)
-                        's' => self.g.swap_sides(),
+                        's' => {
+                            self.autosave();
+                            self.g.swap_sides();
+                        }
                         'u' => self.g.undo(),
                         't' if PACKS.len() > 1 => self.set_pack(self.pack + 1),
                         'p' => self.shot = true,
+                        // R: look at a saved game
+                        'r' => self.replay.open_list(),
+                        // X: arrows from every piece to what it attacks
+                        'x' => self.arrows = !self.arrows,
                         // K and L open, close or bring back the keys and look rails
                         'k' => {
                             self.rails.press_key(Panel::Keys);
@@ -453,6 +516,54 @@ impl App {
             _ => return,
         }
         self.dirty = true;
+    }
+
+    /// Keys while the list of saved games or a replay is open. Nothing here reaches
+    /// the live game or the AI's files.
+    fn replay_key(&mut self, key: &Key, el: &ActiveEventLoop) {
+        let quit =
+            self.mods.super_key() || (cfg!(not(target_os = "macos")) && self.mods.control_key());
+        if let Key::Character(s) = key {
+            if quit && matches!(s.to_lowercase().as_str(), "q" | "w") {
+                el.exit();
+            }
+        }
+        if matches!(key, Key::Character(s) if s.eq_ignore_ascii_case("x")) && !quit {
+            self.arrows = !self.arrows;
+        }
+        if let Some(run) = &mut self.replay.run {
+            match key {
+                Key::Named(NamedKey::ArrowLeft) => run.step(-1),
+                Key::Named(NamedKey::ArrowRight) => run.step(1),
+                Key::Named(NamedKey::Home) => run.goto(0),
+                Key::Named(NamedKey::End) => run.goto(run.total()),
+                // Up and Down: the previous and the next move the engine marked
+                Key::Named(NamedKey::ArrowUp) => {
+                    if let Some(i) = run.next_mark(-1) {
+                        run.goto(i);
+                    }
+                }
+                Key::Named(NamedKey::ArrowDown) => {
+                    if let Some(i) = run.next_mark(1) {
+                        run.goto(i);
+                    }
+                }
+                Key::Named(NamedKey::Escape) => self.replay.leave(),
+                _ => {}
+            }
+        } else {
+            match key {
+                Key::Named(NamedKey::ArrowUp) => {
+                    self.replay.picker.iter_mut().for_each(|p| p.pick(-1))
+                }
+                Key::Named(NamedKey::ArrowDown) => {
+                    self.replay.picker.iter_mut().for_each(|p| p.pick(1))
+                }
+                Key::Named(NamedKey::Enter) => self.replay.open_selected(),
+                Key::Named(NamedKey::Escape) => self.replay.leave(),
+                _ => {}
+            }
+        }
     }
 
     fn redraw(&mut self) {
@@ -513,6 +624,8 @@ impl App {
             piece_names: &self.piece_names,
             pieces_row: self.pieces_row(),
             slide,
+            arrows: self.arrows,
+            replay: self.replay.active().then_some(&self.replay),
         };
         let Some(screen) = &self.screen else {
             return;
@@ -636,7 +749,8 @@ impl ApplicationHandler for App {
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed && !event.repeat =>
+                if event.state == ElementState::Pressed
+                    && (!event.repeat || self.replay.active()) =>
             {
                 self.key(&event.logical_key, el);
             }
@@ -671,10 +785,19 @@ impl ApplicationHandler for App {
         }
     }
 
+    // Quitting: keep the game being played
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        save::save(&mut self.g);
+    }
+
     // Between events: look for the opponent's move, a screenshot request, and time-based changes.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if self.replay.run.as_mut().is_some_and(|r| r.poll()) {
+            self.dirty = true; // the engine finished another position
+        }
         let before = (self.g.sans.len(), self.g.note.clone());
         check_opponent_move(&mut self.g);
+        self.autosave();
         if (self.g.sans.len(), self.g.note.clone()) != before {
             self.dirty = true;
         }
