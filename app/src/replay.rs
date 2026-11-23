@@ -3,7 +3,9 @@
 //! never touches the live game or the files shared with the AI (state.txt).
 use crate::engine::{self, Engine, Eval, Grade};
 use crate::game::{shown_to, Game};
+use crate::rating::{self, Ratings};
 use crate::save::games_dir;
+use crate::score::{self, Score};
 use shakmaty::{fen::Fen, san::San, CastlingMode, Chess, Color as Side, Move, Position, Square};
 use std::{fs, path::PathBuf, str::FromStr};
 
@@ -123,6 +125,8 @@ pub struct Run {
     engine: Option<Engine>,
     pub evals: Vec<Option<Eval>>, // what the engine thinks of each position, as it gets there
     pub engine_missing: bool,     // no Stockfish was found
+    pub score: Option<Score>,     // how each side played, once every position is scored
+    pgn: Option<std::path::PathBuf>, // the saved game this is, to keep the score beside it
 }
 
 impl Run {
@@ -147,6 +151,8 @@ impl Run {
             engine: None,
             evals: vec![],
             engine_missing: false,
+            score: None,
+            pgn: None,
         };
         run.goto(0);
         run
@@ -171,6 +177,23 @@ impl Run {
             if let Some(slot) = self.evals.get_mut(i) {
                 *slot = Some(eval);
                 got = true;
+            }
+        }
+        if got && self.score.is_none() && self.analysed() == self.evals.len() {
+            let moves: Option<Vec<(i32, i32)>> = (1..=self.total())
+                .map(|i| {
+                    // both scores from the mover's side
+                    let white = self.positions[i - 1].turn() == Side::White;
+                    let sign = if white { 1 } else { -1 };
+                    let (b, a) = (self.evals[i - 1].as_ref()?, self.evals[i].as_ref()?);
+                    Some((b.cp * sign, a.cp * sign))
+                })
+                .collect();
+            self.score = moves
+                .filter(|m| !m.is_empty())
+                .map(|m| Score::from_moves(&m));
+            if let (Some(s), Some(p)) = (&self.score, &self.pgn) {
+                score::save(p, s);
             }
         }
         got
@@ -313,6 +336,7 @@ impl Picker {
 /// The replay part of the window: the list open, a game open, or neither.
 #[derive(Default)]
 pub struct State {
+    pub ratings: Ratings, // both Glicko-2 ratings, read when the list opens
     pub picker: Option<Picker>,
     pub run: Option<Run>,
     pub error: Option<String>,
@@ -327,6 +351,7 @@ impl State {
     pub fn open_list(&mut self) {
         self.error = None;
         self.engine_found = engine::find_engine().is_some();
+        self.ratings = rating::load();
         self.picker = Some(Picker {
             entries: list_games(),
             sel: 0,
@@ -347,6 +372,8 @@ impl State {
         match loaded {
             Ok(p) => {
                 let mut run = Run::new(&p, e.cols[0].clone());
+                run.score = score::load(&e.path);
+                run.pgn = Some(e.path.clone());
                 match engine::find_engine() {
                     Some(path) => run.start_analysis(path),
                     None => run.engine_missing = true,
@@ -570,5 +597,40 @@ mod tests {
             Some(Grade::Blunder),
             "2.g4 allows mate"
         );
+    }
+
+    /// Scores a full game (an Italian Four Knights, 36 moves, embedded here) with a real
+    /// Stockfish and prints both sides. Run by hand:
+    /// cargo test score_a_whole_game -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn score_a_whole_game_with_real_stockfish() {
+        let path = engine::find_engine().expect("no Stockfish found");
+        let moves = "1. e4 e5 2. Nf3 Nc6 3. Nc3 Nf6 4. Bc4 Bc5 5. Nb5 Nxe4 6. O-O d5 7. Bd3 O-O \
+            8. Bxe4 dxe4 9. d4 exf3 10. dxc5 Qxd1 11. Rxd1 fxg2 12. f4 Bg4 13. Rd3 Rac8 \
+            14. fxe5 Nxe5 15. Rg3 Nf3+ 16. Kxg2 Ne5 17. b4 Rfe8 18. Bb2 Be6 19. Bxe5 f6 \
+            20. Bc3 Bd5+ 21. Kg1 Re2 22. Rd1 Bxa2 23. Nd4 Re7 24. Nf5 Re5 25. Bxe5 fxe5 \
+            26. Ne7+ Kf7 27. Nxc8 Be6 28. Nxa7 c6 29. Rf1+ Ke7 30. Rxg7+ Ke8 31. Rxb7 Bc4 \
+            32. Rf6 Ba6 33. Rxh7 Bc8 34. Nxc8 e4 35. Nd6+ Kd8 36. Rf8#";
+        let p = parse_pgn(moves).unwrap();
+        let mut r = Run::new(&p, String::new());
+        r.start_analysis(path);
+        let start = std::time::Instant::now();
+        while r.score.is_none() && start.elapsed().as_secs() < 240 {
+            r.poll();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let sc = r.score.expect("scored in time");
+        for (n, side) in [("white (Ann)", Side::White), ("black (AI)", Side::Black)] {
+            let s = sc.of(side);
+            println!(
+                "{n}: {} moves, avg loss {:.0} cp, accuracy {:.0}%, about {}",
+                s.moves,
+                s.acpl,
+                s.accuracy,
+                crate::score::estimate(s.acpl)
+            );
+        }
+        println!("took {:?}", start.elapsed());
     }
 }
