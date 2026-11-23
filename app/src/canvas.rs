@@ -15,6 +15,31 @@ pub struct Color {
 }
 
 impl Color {
+    /// `t` of this colour and the rest of `other` (t = 1 is this colour), alpha kept from this one.
+    pub fn mix(self, other: Color, t: f32) -> Color {
+        let m = |a: f32, b: f32| a * t + b * (1.0 - t);
+        Color {
+            r: m(self.r, other.r),
+            g: m(self.g, other.g),
+            b: m(self.b, other.b),
+            a: self.a,
+        }
+    }
+
+    /// How light it looks, 0 (black) to 1 (white).
+    pub fn luma(self) -> f32 {
+        0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
+    }
+
+    /// Whichever of `a` and `b` stands out more from this colour (for text on it).
+    pub fn ink(self, a: Color, b: Color) -> Color {
+        if (a.luma() - self.luma()).abs() >= (b.luma() - self.luma()).abs() {
+            a
+        } else {
+            b
+        }
+    }
+
     pub fn rgba8(r: u8, g: u8, b: u8, a: u8) -> Self {
         let f = |v: u8| v as f32 / 255.0;
         Color {
@@ -231,6 +256,56 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// A filled rectangle with rounded corners of radius `r`. Use solid colours: where a
+    /// see-through colour is used the corners are drawn twice and show darker.
+    pub fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, c: Color) {
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        self.rect(x + r, y, w - 2.0 * r, h, c);
+        self.rect(x, y + r, r, h - 2.0 * r, c);
+        self.rect(x + w - r, y + r, r, h - 2.0 * r, c);
+        for (cx, cy) in [
+            (x + r, y + r),
+            (x + w - r, y + r),
+            (x + r, y + h - r),
+            (x + w - r, y + h - r),
+        ] {
+            self.round(cx, cy, r, 0.0, c);
+        }
+    }
+
+    /// A top-to-bottom blend from `c0` to `c1`, drawn a pixel row at a time.
+    pub fn vgrad(&mut self, x: f32, y: f32, w: f32, h: f32, c0: Color, c1: Color) {
+        let rows = (h * self.scale).round().max(1.0) as i32;
+        for i in 0..rows {
+            let t = (i as f32 + 0.5) / rows as f32;
+            let c = c1.mix(c0, t);
+            self.rect(x, y + i as f32 / self.scale, w, 1.0 / self.scale + 0.01, c);
+        }
+    }
+
+    /// A soft shadow under a rectangle: a few stacked, faint, growing layers, nudged down.
+    /// Only the part outside the rectangle is drawn (the rectangle goes on top of it
+    /// anyway), so it costs about as much as its edge, not its area.
+    pub fn shadow(&mut self, x: f32, y: f32, w: f32, h: f32, layers: u32) {
+        let c = Color::rgba8(0, 0, 0, 9);
+        for i in 1..=layers {
+            let g = i as f32;
+            self.rect(x - g, y - g + 3.0, w + 2.0 * g, (g - 3.0).max(0.0), c); // above
+            self.rect(x - g, y + h, w + 2.0 * g, g + 3.0, c); // below
+            self.rect(x - g, y, g, h, c); // left
+            self.rect(x + w, y, g, h, c); // right
+        }
+    }
+
+    /// A straight line of thickness `t` with round ends, from (x0, y0) to (x1, y1).
+    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, t: f32, c: Color) {
+        let n = ((x1 - x0).hypot(y1 - y0) * 2.0).ceil().max(1.0) as i32;
+        for i in 0..=n {
+            let f = i as f32 / n as f32;
+            self.round(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, t / 2.0, 0.0, c);
+        }
+    }
+
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: Color) {
         if c.a <= 0.0 {
             return;
@@ -254,6 +329,43 @@ impl<'a> Canvas<'a> {
         self.rect(x, y + h - t, w, t, c);
         self.rect(x, y + t, t, h - 2.0 * t, c);
         self.rect(x + w - t, y + t, t, h - 2.0 * t, c);
+    }
+
+    /// Like `image`, but turned a quarter turn anticlockwise, so text reads from the
+    /// bottom up. `dst` is the turned rectangle in points (its width is the source's
+    /// height, its height the source's width).
+    pub fn image_up(
+        &mut self,
+        img: &Img,
+        src: (f32, f32, f32, f32),
+        dst: (f32, f32, f32, f32),
+        tint: Color,
+    ) {
+        let (sx, sy, sw, sh) = src;
+        let (dx, dy, dw, dh) = dst;
+        let (x0, y0, x1, y1) = self.bounds(dx, dy, dw, dh);
+        let s = self.scale;
+        for row in y0..y1 {
+            for col in x0..x1 {
+                // average four points inside the canvas pixel so the edges stay smooth
+                let mut acc = [0.0f32; 4];
+                for (ox, oy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                    let u = (col as f32 + ox - dx * s) / (dw * s); // across the turned box
+                    let v = (row as f32 + oy - dy * s) / (dh * s); // down it
+                    if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+                        continue;
+                    }
+                    // the source's x runs up the box, its y runs across it
+                    let q = img.sample(sx + (1.0 - v) * sw - 0.5, sy + u * sh - 0.5);
+                    acc[3] += q[3];
+                }
+                let a = acc[3] / 4.0 * tint.a;
+                if a > 0.0 {
+                    let i = row * self.w + col;
+                    self.px[i] = blend(self.px[i], [tint.r, tint.g, tint.b], a);
+                }
+            }
+        }
     }
 
     /// Draws part of an image (`src` in image pixels: x, y, w, h) into a

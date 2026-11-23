@@ -1,0 +1,28 @@
+# Side Chess pack: Kiwen Suwi. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Kiwen Suwi
+
+background = #FFFFFF
+accent = #FFD400
+title = #111111
+text = #171615
+muted = #6B6B6B
+status_your_move = #111111
+status_waiting = #6B6B6B
+status_over = #9E8300
+
+board_border = #111111
+light_square = #F2F2F2
+dark_square = #A9A9A9
+last_from = #FFD40040
+last_to = #FFD40080
+last_outline = #9E8300
+selected = #FFD40099
+target = #FFD4008C
+target_outline = #111111
+half_typed = #11111138
+move_dot = #11111147
+
+banner = #FFFFFF
+banner_title = #111111
+banner_result = #9E8300

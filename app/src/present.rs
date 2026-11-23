@@ -206,7 +206,7 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pack::{load_pack, load_pack_for, PACKS};
+    use crate::pack::{load_look_for, load_pack, PACKS};
 
     fn device_rgb() -> Screen {
         Screen(CGColorSpace::new_device_rgb().unwrap())
@@ -229,7 +229,7 @@ mod tests {
         );
         for i in 0..PACKS.len() {
             let (mut plain, plain_px) = load_pack(i);
-            let (mut conv, conv_px) = load_pack_for(i, &p3);
+            let (mut conv, conv_px) = load_look_for(i, i, &p3);
             for (a, b) in plain.colors_mut().iter().zip(conv.colors_mut().iter()) {
                 assert_eq!(a.a, b.a, "pack {}: alpha must not change", PACKS[i].0);
             }

@@ -1,0 +1,28 @@
+# Side Chess pack: Chessnut. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Chessnut
+
+background = #F7F9FB
+accent = #4F8CFF
+title = #1E2B3A
+text = #1C2025
+muted = #707983
+status_your_move = #1E2B3A
+status_waiting = #707983
+status_over = #31579E
+
+board_border = #1E2B3A
+light_square = #EEF1F4
+dark_square = #8EA2B8
+last_from = #4F8CFF40
+last_to = #4F8CFF80
+last_outline = #31579E
+selected = #4F8CFF99
+target = #4F8CFF8C
+target_outline = #1E2B3A
+half_typed = #1E2B3A38
+move_dot = #1E2B3A47
+
+banner = #F7F9FB
+banner_title = #1E2B3A
+banner_result = #31579E

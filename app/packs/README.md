@@ -30,7 +30,7 @@ Only use art you made or that's licensed for sharing, and say where it came from
 | Key | Used for |
 |---|---|
 | `background`, `accent`, `title`, `text`, `muted`, `error` | The window, the bar beside the title, the title, the move list, quiet text, a note about an illegal move |
-| `status_your_move`, `status_waiting`, `status_over` | The status at the top right |
+| `status_your_move`, `status_waiting`, `status_over` | Kept for older packs; the status at the top right is now a capsule drawn in `accent` (your move), `error` (in check) or a tint of the header band (waiting, over) |
 | `board_border`, `light_square`, `dark_square` | The board |
 | `last_from`, `last_to`, `last_outline` | The last move: where it left, where it landed, its outline |
 | `selected` | Your selected piece |

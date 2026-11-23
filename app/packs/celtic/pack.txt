@@ -1,0 +1,28 @@
+# Side Chess pack: Celtic. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Celtic
+
+background = #F4F6EC
+accent = #C8A24A
+title = #1F4D3A
+text = #1D2E25
+muted = #708D7E
+status_your_move = #1F4D3A
+status_waiting = #708D7E
+status_over = #7C642E
+
+board_border = #1F4D3A
+light_square = #E8EFDF
+dark_square = #7F9F76
+last_from = #C8A24A40
+last_to = #C8A24A80
+last_outline = #7C642E
+selected = #C8A24A99
+target = #C8A24A8C
+target_outline = #1F4D3A
+half_typed = #1F4D3A38
+move_dot = #1F4D3A47
+
+banner = #F4F6EC
+banner_title = #1F4D3A
+banner_result = #7C642E

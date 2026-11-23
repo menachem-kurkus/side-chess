@@ -159,16 +159,33 @@ pub fn saved_pack() -> usize {
         .unwrap_or(0)
 }
 
-pub fn load_pack(index: usize) -> (Theme, Img) {
-    let theme = Theme::load(index)
+/// A pack's colours (the native pack's are the system's own, where they can be read).
+pub fn load_theme(index: usize) -> Theme {
+    let mut theme = Theme::load(index)
         .or_else(|_| Theme::load(pack_index(DEFAULT_PACK).unwrap_or(0)))
         .expect("the default pack loads");
-    (theme, Img::from_png(PACKS[index].2))
+    if PACKS[index].0 == "native" {
+        crate::native::apply(&mut theme); // the system's own colours, where they can be read
+    }
+    theme
 }
 
-/// A pack with its colours and pieces converted to the screen the window is on.
-pub fn load_pack_for(index: usize, screen: &crate::present::Screen) -> (Theme, Img) {
-    let (mut th, mut pieces) = load_pack(index);
+/// A pack's piece drawings.
+pub fn load_pieces(index: usize) -> Img {
+    Img::from_png(PACKS[index].2)
+}
+
+pub fn load_pack(index: usize) -> (Theme, Img) {
+    (load_theme(index), load_pieces(index))
+}
+
+/// A pack's colours with another pack's pieces, converted to the screen the window is on.
+pub fn load_look_for(
+    colours: usize,
+    pieces: usize,
+    screen: &crate::present::Screen,
+) -> (Theme, Img) {
+    let (mut th, mut pieces) = (load_theme(colours), load_pieces(pieces));
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     let mut cols: Vec<[u8; 4]> = th
         .colors_mut()
@@ -183,6 +200,52 @@ pub fn load_pack_for(index: usize, screen: &crate::present::Screen) -> (Theme, I
     }
     screen.convert(&mut pieces.px);
     (th, pieces)
+}
+
+/// The different piece drawings the packs carry: the index of the first pack with each
+/// (several packs share the classic ones). These are the choices in the Pieces list.
+pub fn piece_sets() -> &'static [usize] {
+    static SETS: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+    SETS.get_or_init(|| {
+        let mut firsts: Vec<usize> = vec![];
+        for i in 0..PACKS.len() {
+            if !firsts.iter().any(|&j| PACKS[j].2 == PACKS[i].2) {
+                firsts.push(i);
+            }
+        }
+        firsts
+    })
+}
+
+/// The first pack that has the same piece drawings as `index` (what the Pieces list marks).
+pub fn piece_set_of(index: usize) -> usize {
+    piece_sets()
+        .iter()
+        .copied()
+        .find(|&j| PACKS[j].2 == PACKS[index].2)
+        .unwrap_or(index)
+}
+
+/// The piece set picked on its own (saved in ~/.side-chess/pieces.txt); None means the
+/// pieces follow the colours' look, as they always did.
+pub fn saved_pieces() -> Option<usize> {
+    fs::read_to_string(live_dir().join("pieces.txt"))
+        .ok()
+        .and_then(|id| pack_index(id.trim()))
+        .map(piece_set_of)
+}
+
+pub fn save_pieces(choice: Option<usize>) {
+    let path = live_dir().join("pieces.txt");
+    match choice {
+        Some(i) => {
+            let _ = fs::create_dir_all(live_dir());
+            let _ = fs::write(path, PACKS[i].0);
+        }
+        None => {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -222,5 +285,32 @@ mod tests {
         assert!(hex_color("1152D4").is_none());
         assert!(hex_color("#12345").is_none());
         assert!(hex_color("#GGGGGG").is_none());
+    }
+
+    #[test]
+    fn the_piece_sets_are_the_different_drawings_and_each_pack_maps_to_one() {
+        let sets = piece_sets();
+        assert!(sets.len() >= 2 && sets.len() <= PACKS.len());
+        for i in 0..PACKS.len() {
+            let s = piece_set_of(i);
+            assert!(sets.contains(&s), "{}", PACKS[i].0);
+            assert_eq!(PACKS[s].2, PACKS[i].2, "same drawings");
+        }
+        // the sets really differ from each other
+        for (n, &a) in sets.iter().enumerate() {
+            for &b in &sets[n + 1..] {
+                assert_ne!(PACKS[a].2, PACKS[b].2);
+            }
+        }
+    }
+
+    #[test]
+    fn one_packs_colours_with_anothers_pieces_loads() {
+        // not converted to a screen (that needs a window), just the two halves
+        let wood = pack_index("wood").unwrap();
+        let fantasy = pack_index("fantasy").unwrap();
+        let (th, px) = (load_theme(wood), load_pieces(fantasy));
+        assert_eq!(th.name, "Wood");
+        assert_eq!((px.w, px.h), (768, 256));
     }
 }

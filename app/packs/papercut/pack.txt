@@ -1,0 +1,28 @@
+# Side Chess pack: Papercut. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Papercut
+
+background = #EFE8DF
+accent = #D1603D
+title = #4A3B32
+text = #2E2722
+muted = #897D74
+status_your_move = #4A3B32
+status_waiting = #897D74
+status_over = #823C26
+
+board_border = #3E3029
+light_square = #B8A99A
+dark_square = #6E5E52
+last_from = #D1603D40
+last_to = #D1603D80
+last_outline = #823C26
+selected = #D1603D99
+target = #D1603D8C
+target_outline = #3E3029
+half_typed = #3E302938
+move_dot = #3E302947
+
+banner = #EFE8DF
+banner_title = #4A3B32
+banner_result = #823C26

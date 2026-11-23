@@ -61,7 +61,7 @@ Codex finds the skill on its own when you open it in this repository. To use it 
 
 - Click a piece, then a square. Pawns promote to a queen.
 - Or type a square's letter and number, in either order (half a square tints its row or column), then the square to move to, then Enter. Typing another of your pieces switches to it; illegal squares are ignored. Esc clears.
-- Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, S swaps sides (you play black, the assistant plays white) and starts a new game, but only before the first move or after a game ends; mid-game the window shows a message asking you to press N first, T switches the look (pack), P saves a screenshot.
+- Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, S swaps sides (you play black, the assistant plays white) and starts a new game, but only before the first move or after a game ends; mid-game the window shows a message asking you to press N first, T switches the look (pack), P saves a screenshot, K and L open, close or bring back the two thin side windows beside the board: Keys on the left lists these keys, Look on the right lists the looks (click one to switch to it, or point at one to preview it on the board) and shows the pack in use. Click a rail to open it, the arrow button folds it back to a rail, the cross button hides it. They follow the board when you move it; moving or opening a rail never moves the board.
 - The board shows the last move in gold, a king in check in red, and a banner for checkmate, stalemate or a draw. Pick a piece and faded dots show where it can go (a ring on a piece it can take). Castling (click the king, then g or c) and en passant work.
 
 ## How it works
@@ -75,6 +75,8 @@ The window is drawn in plain memory, without the graphics card: a graphics drive
 For testing, `CHESS_FEN="<fen>" ~/.side-chess/build/release/side-chess` starts from any position.
 
 ## Make your own look
+
+There are twelve looks. **Native** takes its colours from the operating system itself (on a Mac: the system accent colour and light or dark mode; elsewhere it uses plain system-style colours for now). Eight of the others use piece sets drawn by other people, taken from the Lichess piece collection: Fantasy, Spatial and Celtic (Maurizio Monge, MIT), Chessnut (Alexis Luengas, Apache 2.0), Papercut (Nikolay Anzarov, CC BY 4.0), Kiwen Suwi (neverRare, CC BY 4.0), Peach (RhosGFX, CC0) and Pixel (therealqtpi, AGPL-3.0-or-later). Each pack folder has a CREDITS.md with the author, licence and what was changed. The Look panel has two lists: pick the colours and the pieces separately (for example the Wood board with the Fantasy pieces), point at a row to preview it, click to keep it. "Same as colours" makes the pieces follow the colours again.
 
 Looks are **packs** (press T to switch; `No Crosses` is the Blue and Gold look with no crosses on the king or bishop): a folder in `app/packs/` with one text file of colours, and optionally your own piece images. Copy `app/packs/wood`, change what you like, run the install script (`bash app/install.sh` on a Mac or Linux, `app\install.ps1` on Windows), and press T. Details: [app/packs/README.md](app/packs/README.md).
 

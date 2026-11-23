@@ -14,9 +14,11 @@
 mod canvas;
 mod draw;
 mod game;
+mod native;
 mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
 mod present;
+mod rails;
 mod text;
 
 use canvas::{Canvas, Img};
@@ -24,8 +26,11 @@ use draw::{square_at, View, H, SQ, W};
 use game::{
     check_opponent_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game,
 };
-use pack::{load_pack, load_pack_for, saved_pack, Theme, PACKS};
+use pack::{
+    load_look_for, load_pack, piece_sets, save_pieces, saved_pack, saved_pieces, Theme, PACKS,
+};
 use present::{Presenter, Screen};
+use rails::{Hit, Mode, Panel, Rails, LEN, TOP};
 use shakmaty::{fen::Fen, Chess, Color as Side, Position};
 use std::{
     fs,
@@ -35,7 +40,7 @@ use std::{
 use text::Txt;
 use winit::{
     application::ApplicationHandler,
-    dpi::LogicalSize,
+    dpi::{LogicalPosition, LogicalSize},
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState, NamedKey},
@@ -44,6 +49,18 @@ use winit::{
 
 /// How often the app looks for the opponent's move and a screenshot request.
 const POLL: Duration = Duration::from_millis(250);
+
+/// How long a moved piece glides to its square.
+const SLIDE: Duration = Duration::from_millis(150);
+
+/// One of the thin side windows (see rails.rs): its own window, docked beside the board.
+struct RailWin {
+    panel: Panel,
+    window: Rc<Window>,
+    presenter: Presenter,
+    mouse: (f32, f32),  // the pointer in this window
+    hover: Option<Hit>, // the button under it
+}
 
 struct App {
     window: Option<Rc<Window>>,
@@ -64,6 +81,17 @@ struct App {
     dots: usize,
     dirty: bool,
     shot: bool,
+    rails: Rails,
+    rail_wins: Vec<RailWin>,
+    preview: Option<usize>, // a look the pointer is on in the Look list, shown until it leaves
+    rails_away: bool,       // the rails are out of sight because the board is minimised
+    prev_moves: usize,      // how many moves the last frame had
+    slide_from: Option<Instant>, // when the last move's slide began
+    native_seen: Option<native::Native>, // the system colours the native look was last built from
+    pack_names: Vec<String>,
+    piece_names: Vec<String>,     // the piece sets in the Pieces list
+    pieces_choice: Option<usize>, // a piece set picked on its own; None follows the colours
+    preview_pieces: Option<Option<usize>>, // a pieces row the pointer is on (None inside: "same as colours")
 }
 
 impl App {
@@ -106,7 +134,231 @@ impl App {
             dots: 1,
             dirty: true,
             shot: false,
+            rails: Rails::load(),
+            rail_wins: vec![],
+            native_seen: None,
+            preview: None,
+            rails_away: false,
+            prev_moves: 0,
+            slide_from: None,
+            pack_names: (0..PACKS.len())
+                .map(|i| {
+                    Theme::load(i)
+                        .map(|t| t.name)
+                        .unwrap_or_else(|_| PACKS[i].0.to_string())
+                })
+                .collect(),
+            piece_names: piece_sets()
+                .iter()
+                .map(|&i| {
+                    if PACKS[i].0 == pack::DEFAULT_PACK {
+                        "Classic".to_string()
+                    } else {
+                        Theme::load(i)
+                            .map(|t| t.name)
+                            .unwrap_or_else(|_| PACKS[i].0.to_string())
+                    }
+                })
+                .collect(),
+            pieces_choice: saved_pieces(),
+            preview_pieces: None,
         }
+    }
+
+    /// The look on screen: the one under the pointer in the Look list, else the chosen one.
+    fn shown_pack(&self) -> usize {
+        self.preview.unwrap_or(self.pack)
+    }
+
+    /// The piece set on screen: the one the pointer is on in the Pieces list, else the one
+    /// picked on its own, else the colours' own.
+    fn shown_pieces(&self) -> usize {
+        self.preview_pieces
+            .unwrap_or(self.pieces_choice)
+            .unwrap_or_else(|| self.shown_pack())
+    }
+
+    /// The row of the Pieces list that is in use (0 is "same as colours").
+    fn pieces_row(&self) -> usize {
+        self.pieces_choice
+            .and_then(|c| piece_sets().iter().position(|&s| s == c))
+            .map_or(0, |k| k + 1)
+    }
+
+    /// What a row of the Pieces list stands for.
+    fn row_choice(row: usize) -> Option<usize> {
+        row.checked_sub(1)
+            .and_then(|k| piece_sets().get(k).copied())
+    }
+
+    /// Pick a piece set on its own (None: follow the colours again) and remember it.
+    fn set_pieces(&mut self, choice: Option<usize>) {
+        self.pieces_choice = choice;
+        self.preview_pieces = None;
+        self.screen = None;
+        save_pieces(choice);
+        self.dirty = true;
+    }
+
+    /// Show a piece set while the pointer is on its row in the list (None when it leaves).
+    fn preview_pieces_row(&mut self, row: Option<usize>) {
+        let want = row
+            .map(Self::row_choice)
+            .filter(|c| *c != self.pieces_choice);
+        if want != self.preview_pieces {
+            self.preview_pieces = want;
+            self.screen = None;
+            self.dirty = true;
+        }
+    }
+
+    /// Choose a look (T, or a click in the Look list) and remember it.
+    fn set_pack(&mut self, i: usize) {
+        self.pack = i % PACKS.len();
+        self.preview = None;
+        self.screen = None; // the next redraw loads it for this screen
+        let _ = fs::create_dir_all(live_dir());
+        let _ = fs::write(live_dir().join("pack.txt"), PACKS[self.pack].0);
+        self.pack_shown_at = Some(Instant::now());
+        self.dirty = true;
+    }
+
+    /// Show a look while the pointer is on it in the list (None when it leaves).
+    fn preview_pack(&mut self, i: Option<usize>) {
+        let i = i.filter(|i| *i != self.pack);
+        if i != self.preview {
+            self.preview = i;
+            self.screen = None;
+            self.dirty = true;
+        }
+    }
+
+    /// A rail was opened, closed or hidden: save it and make the windows match.
+    fn rails_changed(&mut self, el: &ActiveEventLoop) {
+        self.rails.save();
+        self.sync_rails(el);
+        self.dirty = true;
+    }
+
+    /// Open a window for each rail on show, close the hidden ones, size the rest and
+    /// put them all in a row beside the board.
+    fn sync_rails(&mut self, el: &ActiveEventLoop) {
+        if self.window.is_none() {
+            return;
+        }
+        for p in [Panel::Keys, Panel::Look] {
+            let mode = self.rails.mode(p);
+            let have = self.rail_wins.iter().position(|r| r.panel == p);
+            let w = Rails::width_of(p, mode) as f64;
+            match (mode, have) {
+                (Mode::Hidden, Some(i)) => {
+                    self.rail_wins.remove(i);
+                }
+                (Mode::Hidden, None) => {}
+                (_, Some(i)) => {
+                    let _ = self.rail_wins[i]
+                        .window
+                        .request_inner_size(LogicalSize::new(w, LEN as f64));
+                }
+                (_, None) => {
+                    let attrs = Window::default_attributes()
+                        .with_title("Side Chess")
+                        .with_decorations(false)
+                        .with_resizable(false)
+                        .with_active(false)
+                        .with_inner_size(LogicalSize::new(w, LEN as f64));
+                    // a rail is part of the board's window group: no taskbar entry of its own
+                    #[cfg(windows)]
+                    let attrs = {
+                        use winit::platform::windows::WindowAttributesExtWindows;
+                        attrs.with_skip_taskbar(true)
+                    };
+                    // Not a child of the board window: macOS moves a whole group of windows
+                    // together to keep a child on screen, and a rail must never move the board.
+                    // The rails follow the board instead (see place_rails).
+                    if let Ok(window) = el.create_window(attrs) {
+                        let window = Rc::new(window);
+                        let presenter = Presenter::new(&window);
+                        window.request_redraw();
+                        self.rail_wins.push(RailWin {
+                            panel: p,
+                            window,
+                            presenter,
+                            mouse: (0.0, 0.0),
+                            hover: None,
+                        });
+                    }
+                }
+            }
+        }
+        for r in &mut self.rail_wins {
+            r.hover = None;
+        }
+        self.preview_pack(None); // a closed or folded list can't keep a look on show
+        self.preview_pieces_row(None);
+        self.place_rails();
+    }
+
+    /// Line the rail windows up beside the board window.
+    fn place_rails(&self) {
+        let Some(main) = &self.window else {
+            return;
+        };
+        let Ok(at) = main.inner_position() else {
+            return;
+        };
+        // In screen points, which mean the same on every display (pixels do not: the
+        // rails may be on a screen with a different scale from the board's).
+        let at: LogicalPosition<f64> = at.to_logical(main.scale_factor());
+        for (p, x, _) in self.rails.layout() {
+            if let Some(r) = self.rail_wins.iter().find(|r| r.panel == p) {
+                r.window
+                    .set_outer_position(LogicalPosition::new(at.x + x as f64, at.y + TOP as f64));
+            }
+        }
+    }
+
+    fn request_redraws(&self) {
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+        for r in &self.rail_wins {
+            r.window.request_redraw();
+        }
+    }
+
+    /// Draw one rail window.
+    fn redraw_rail(&self, i: usize) {
+        let Some(screen) = &self.screen else {
+            return; // the board window has not worked out the screen's colours yet
+        };
+        let rw = &self.rail_wins[i];
+        let size = rw.window.inner_size();
+        let (w, h) = (size.width as usize, size.height as usize);
+        if w == 0 || h == 0 {
+            return;
+        }
+        let scale = rw.window.scale_factor();
+        let view = View {
+            th: &self.th,
+            pieces: self.sized.as_ref().map_or(&self.pieces, |s| &s.2),
+            tile: self.sized.as_ref().map_or(128.0, |s| s.1 as f32),
+            txt: &self.txt,
+            kb_file: None,
+            kb_rank: None,
+            thinking_dots: self.dots,
+            show_pack_name: false,
+            rails: &self.rails,
+            pack: self.pack,
+            pack_names: &self.pack_names,
+            piece_names: &self.piece_names,
+            pieces_row: self.pieces_row(),
+            slide: None,
+        };
+        rw.presenter.frame(w, h, scale, screen, |px| {
+            let mut cv = Canvas::new(px, w, h, scale as f32);
+            rails::draw_panel(&mut cv, &view, rw.panel, rw.hover);
+        });
     }
 
     fn my_turn(&self) -> bool {
@@ -176,14 +428,17 @@ impl App {
                         // swap sides: only between games (refused mid-game: press N first)
                         's' => self.g.swap_sides(),
                         'u' => self.g.undo(),
-                        't' if PACKS.len() > 1 => {
-                            self.pack = (self.pack + 1) % PACKS.len();
-                            self.screen = None; // the next redraw loads it for this screen
-                            let _ = fs::create_dir_all(live_dir());
-                            let _ = fs::write(live_dir().join("pack.txt"), PACKS[self.pack].0);
-                            self.pack_shown_at = Some(Instant::now());
-                        }
+                        't' if PACKS.len() > 1 => self.set_pack(self.pack + 1),
                         'p' => self.shot = true,
+                        // K and L open, close or bring back the keys and look rails
+                        'k' => {
+                            self.rails.press_key(Panel::Keys);
+                            self.rails_changed(el);
+                        }
+                        'l' => {
+                            self.rails.press_key(Panel::Look);
+                            self.rails_changed(el);
+                        }
                         _ => {}
                     }
                 }
@@ -212,10 +467,14 @@ impl App {
         let scale = window.scale_factor();
         // New screen (or new pack): convert the pack's colours for this screen.
         let screen = presenter.screen();
-        if self.screen.as_ref() != Some(&screen) {
-            (self.th, self.pieces) = load_pack_for(self.pack, &screen);
+        let screen_changed = self.screen.as_ref() != Some(&screen);
+        if screen_changed {
+            (self.th, self.pieces) = load_look_for(self.shown_pack(), self.shown_pieces(), &screen);
             self.screen = Some(screen);
             self.sized = None;
+            if PACKS[self.shown_pack()].0 == "native" {
+                self.native_seen = native::read();
+            }
         }
         // Windows screens often run at 125% or 150%: redraw the pieces once at the
         // exact size they are shown, so a frame copies pixels instead of resampling.
@@ -223,6 +482,19 @@ impl App {
         if cfg!(not(target_os = "macos")) && self.sized.as_ref().map(|s| s.0) != Some(scale) {
             let tile = ((SQ - 4.0) as f64 * scale).round().max(1.0) as usize;
             self.sized = Some((scale, tile, self.pieces.with_tiles_of(tile)));
+        }
+        // A move just played slides its piece across for a moment
+        let moves = self.g.sans.len();
+        if moves == self.prev_moves + 1 {
+            self.slide_from = Some(Instant::now());
+        }
+        self.prev_moves = moves;
+        let slide = self
+            .slide_from
+            .map(|t| t.elapsed().as_secs_f32() / SLIDE.as_secs_f32())
+            .filter(|t| *t < 1.0);
+        if slide.is_none() {
+            self.slide_from = None;
         }
         let view = View {
             th: &self.th,
@@ -235,6 +507,12 @@ impl App {
             show_pack_name: self
                 .pack_shown_at
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(2)),
+            rails: &self.rails,
+            pack: self.pack,
+            pack_names: &self.pack_names,
+            piece_names: &self.piece_names,
+            pieces_row: self.pieces_row(),
+            slide,
         };
         let Some(screen) = &self.screen else {
             return;
@@ -251,6 +529,16 @@ impl App {
                 let _ = cv.save_png(&live_dir().join("screen.png"), screen.icc());
             }
         });
+        // the rails wait for the board to work out the screen's colours: draw them now
+        if screen_changed {
+            for r in &self.rail_wins {
+                r.window.request_redraw();
+            }
+        }
+        // while a piece is sliding, ask for the next frame straight away
+        if slide.is_some() {
+            window.request_redraw();
+        }
     }
 }
 
@@ -280,23 +568,71 @@ impl ApplicationHandler for App {
         self.presenter = Some(Presenter::new(&window));
         window.request_redraw();
         self.window = Some(window);
+        self.sync_rails(el);
     }
 
-    fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, ev: WindowEvent) {
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, ev: WindowEvent) {
+        // which rail window this is for, if it is not the board window
+        let rail = self.rail_wins.iter().position(|r| r.window.id() == id);
         match ev {
-            WindowEvent::CloseRequested => el.exit(),
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::CloseRequested if rail.is_none() => el.exit(),
+            WindowEvent::RedrawRequested => match rail {
+                Some(i) => self.redraw_rail(i),
+                None => self.redraw(),
+            },
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
-            WindowEvent::CursorMoved { position, .. } => {
-                let s = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
-                self.mouse = ((position.x / s) as f32, (position.y / s) as f32);
+            WindowEvent::CursorMoved { position, .. } => match rail {
+                Some(i) => {
+                    let r = &mut self.rail_wins[i];
+                    let s = r.window.scale_factor();
+                    r.mouse = ((position.x / s) as f32, (position.y / s) as f32);
+                    let hover = self.rails.hit(r.panel, r.mouse.0, r.mouse.1);
+                    if hover != r.hover {
+                        r.hover = hover;
+                        self.dirty = true;
+                    }
+                    // pointing at a row shows it; leaving the lists puts the chosen look back
+                    let (colours, pieces) = match hover {
+                        Some(Hit::Colours(i)) => (Some(i), None),
+                        Some(Hit::Pieces(i)) => (None, Some(i)),
+                        _ => (None, None),
+                    };
+                    self.preview_pack(colours);
+                    self.preview_pieces_row(pieces);
+                }
+                None => {
+                    let s = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
+                    self.mouse = ((position.x / s) as f32, (position.y / s) as f32);
+                }
+            },
+            WindowEvent::CursorLeft { .. } => {
+                if let Some(i) = rail {
+                    if self.rail_wins[i].hover.take().is_some() {
+                        self.dirty = true;
+                    }
+                    self.preview_pack(None);
+                    self.preview_pieces_row(None);
+                }
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
             } => {
-                self.click();
+                match rail {
+                    Some(i) => {
+                        let (p, (x, y)) = (self.rail_wins[i].panel, self.rail_wins[i].mouse);
+                        let hit = self.rails.hit(p, x, y);
+                        if let Some(Hit::Colours(k)) = hit {
+                            self.set_pack(k); // a click keeps the colours the pointer is on
+                        } else if let Some(Hit::Pieces(row)) = hit {
+                            self.set_pieces(Self::row_choice(row)); // ... or the pieces
+                        } else if self.rails.click(p, x, y) {
+                            self.rails_changed(el);
+                        }
+                    }
+                    None => self.click(),
+                }
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -304,19 +640,34 @@ impl ApplicationHandler for App {
             {
                 self.key(&event.logical_key, el);
             }
+            WindowEvent::Resized(_) if rail.is_some() => {
+                self.place_rails(); // a rail changed width: keep it against the board
+                self.dirty = true;
+            }
+            WindowEvent::Moved(_) if rail.is_none() => {
+                self.place_rails(); // the board window moved (maybe onto another screen)
+                self.dirty = true;
+            }
             WindowEvent::Resized(_)
-            | WindowEvent::Moved(_) // maybe onto another screen
-            | WindowEvent::ScaleFactorChanged { .. }
-            | WindowEvent::Focused(_) => {
+            | WindowEvent::Moved(_)
+            | WindowEvent::ScaleFactorChanged { .. } => {
+                self.dirty = true;
+            }
+            WindowEvent::Focused(focused) => {
+                // the native look follows the system: light or dark, or a new accent colour
+                if focused
+                    && PACKS[self.shown_pack()].0 == "native"
+                    && native::read() != self.native_seen
+                {
+                    self.screen = None;
+                }
                 self.dirty = true;
             }
             _ => {}
         }
         if self.dirty {
             self.dirty = false;
-            if let Some(w) = &self.window {
-                w.request_redraw();
-            }
+            self.request_redraws();
         }
     }
 
@@ -326,6 +677,18 @@ impl ApplicationHandler for App {
         check_opponent_move(&mut self.g);
         if (self.g.sans.len(), self.g.note.clone()) != before {
             self.dirty = true;
+        }
+        // The rails go away with the board when it is minimised, and come back with it
+        let minimised = self
+            .window
+            .as_ref()
+            .and_then(|w| w.is_minimized())
+            .unwrap_or(false);
+        if minimised != self.rails_away {
+            self.rails_away = minimised;
+            for r in &self.rail_wins {
+                r.window.set_visible(!minimised);
+            }
         }
         let shot_req = live_dir().join("shot");
         if shot_req.exists() {
@@ -349,9 +712,7 @@ impl ApplicationHandler for App {
         }
         if self.dirty {
             self.dirty = false;
-            if let Some(w) = &self.window {
-                w.request_redraw();
-            }
+            self.request_redraws();
         }
         el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + POLL));
     }

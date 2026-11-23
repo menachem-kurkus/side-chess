@@ -1,0 +1,28 @@
+# Side Chess pack: Pixel. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Pixel
+
+background = #F1EEDC
+accent = #E3B23C
+title = #2B3A1F
+text = #21261A
+muted = #767E67
+status_your_move = #2B3A1F
+status_waiting = #767E67
+status_over = #8D6E25
+
+board_border = #2B3A1F
+light_square = #E8E2C4
+dark_square = #6E9B5A
+last_from = #E3B23C40
+last_to = #E3B23C80
+last_outline = #8D6E25
+selected = #E3B23C99
+target = #E3B23C8C
+target_outline = #2B3A1F
+half_typed = #2B3A1F38
+move_dot = #2B3A1F47
+
+banner = #F1EEDC
+banner_title = #2B3A1F
+banner_result = #8D6E25
