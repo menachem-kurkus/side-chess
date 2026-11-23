@@ -131,8 +131,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      # The app ships for Mac and Windows only; on Linux build.rs bakes its
-      # pieces and text from these free fonts instead, so the tests can run.
+      # On Linux build.rs bakes its pieces and text from these free fonts.
       - name: Fonts
         run: sudo apt-get update -q && sudo apt-get install -y -q fonts-liberation fonts-dejavu-core
       - name: Formatting
@@ -168,5 +167,5 @@ jobs:
             echo "| Tests | $(result "$TESTS") | ${tests:-no result} |"
             echo "| Plugin, mod and skill | $(result "$PLUGIN") | \`claude plugin validate\` |"
             echo
-            echo "The app isn't installed or memory-checked here: it ships for Mac and Windows."
+            echo "The app isn't installed or memory-checked here: that is done on Mac and Windows."
           } >> "$GITHUB_STEP_SUMMARY"

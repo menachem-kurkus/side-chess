@@ -14,7 +14,7 @@ A pack is one look for Side Chess: a folder here with a `pack.txt`. Every folder
 
 `move_dot` is the colour of the faded dots that show where the selected piece can go (give it some see-through, like `#0C3A9747`).
 
-By default a pack's pieces are drawn at build time from `piece_font` (Apple Symbols on a Mac, Segoe UI Symbol on Windows; give several paths separated by `|` and the first one found is used), filled with `piece_white` and `piece_black`.
+By default a pack's pieces are drawn at build time from `piece_font` (Apple Symbols on a Mac, Segoe UI Symbol on Windows, DejaVu Sans on Linux; give several paths separated by `|` and the first one found is used), filled with `piece_white` and `piece_black`.
 
 `piece_no_crosses = true` takes the crosses off the king and the bishop (see the `no-cross` pack, which is Blue and Gold with that one line changed).
 

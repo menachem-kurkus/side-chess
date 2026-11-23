@@ -1,9 +1,9 @@
 [package]
 name = "side-chess"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "A tiny chess window for playing a Claude Code session, on Mac and Windows"
+description = "A tiny chess window for playing an AI session, on Mac, Windows and Linux"
 
 [[bin]]
 name = "side-chess"

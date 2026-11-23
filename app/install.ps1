@@ -14,6 +14,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $dir = Join-Path $env:LOCALAPPDATA 'Programs\Side Chess'
 New-Item -ItemType Directory -Force $dir | Out-Null
 $exe = Join-Path $dir 'side-chess.exe'
+# A running copy locks the program file, so close it before replacing it
+Get-Process side-chess -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force
+Start-Sleep -Milliseconds 300
 Copy-Item (Join-Path $env:CARGO_TARGET_DIR 'release\side-chess.exe') $exe -Force
 Copy-Item (Join-Path $PSScriptRoot 'icon\icon.ico') (Join-Path $dir 'icon.ico') -Force
 $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Side Chess.lnk'
@@ -21,7 +24,12 @@ $sh = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
 $sh.TargetPath = $exe
 $sh.WorkingDirectory = $dir
 $sh.IconLocation = (Join-Path $dir 'icon.ico')
-$sh.Description = 'Play chess against your Claude Code session'
+$sh.Description = 'Play chess against your AI session'
 $sh.Save()
+# The installed version, so the skills can tell when the app is out of date
+$ver = (Select-String -Path (Join-Path $PSScriptRoot 'Cargo.toml') -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+$live = Join-Path $env:USERPROFILE '.side-chess'
+New-Item -ItemType Directory -Force $live | Out-Null
+[IO.File]::WriteAllText((Join-Path $live 'app_version.txt'), $ver, [Text.Encoding]::ASCII)
 Write-Host "Installed: $exe"
 Write-Host "Start Menu shortcut: $lnk"

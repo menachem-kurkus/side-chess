@@ -13,7 +13,7 @@ export const register: Register = on => {
     const launch = async () => {
       const env = await $.process.hookEnv()
       const root = env.CLAUDE_PLUGIN_ROOT ?? ''
-      // macOS: open the app. Windows: start the installed program.
+      // Linux: start ~/.local/bin/side-chess. macOS: open the app. Windows: start the installed program.
       const attempt = async (cmd: string[]) => {
         try {
           return (await $.process.run(cmd)).exitCode === 0
@@ -22,6 +22,11 @@ export const register: Register = on => {
         }
       }
       const opened =
+        (await attempt([
+          'sh',
+          '-c',
+          '[ "$(uname)" = Linux ] && [ -x "$HOME/.local/bin/side-chess" ] && { nohup "$HOME/.local/bin/side-chess" >/dev/null 2>&1 & }',
+        ])) ||
         (await attempt(['open', '-a', 'Side Chess'])) ||
         (await attempt([
           'powershell',
@@ -39,7 +44,7 @@ export const register: Register = on => {
       void $.prompt.submit({
         text:
           'Side Chess is not installed yet. Use the side-chess skill: install it with ' +
-          `bash "${root}/app/install.sh" on a Mac, or ` +
+          `bash "${root}/app/install.sh" on a Mac or Linux, or ` +
           `powershell -ExecutionPolicy Bypass -File "${root}/app/install.ps1" on Windows, open it, then play black.`,
       })
     }

@@ -39,17 +39,18 @@ Thanks for helping. Anyone can open an issue or a pull request.
 
 | Path | What it is |
 |---|---|
-| `app/src/game.rs` | Rules, typed and clicked moves, the files shared with Claude |
+| `app/src/game.rs` | Rules, typed and clicked moves, the files shared with the AI (`state.txt`, the move files) |
 | `app/src/draw.rs` | What the window shows (layout) |
 | `app/src/pack.rs` | Loading a pack's colours and pieces |
 | `app/src/canvas.rs` | Drawing in plain memory |
 | `app/src/present.rs` | Showing frames in the screen's own colours; converting pack colours per screen |
 | `app/src/text.rs` | Text from the baked atlas |
 | `app/src/main.rs` | The window, keys and mouse |
-| `app/build.rs` | Bakes pieces and text from the Mac's or Windows PC's own fonts at build time |
+| `app/build.rs` | Bakes pieces and text from the system's fonts at build time |
 | `app/packs/` | Looks ("packs"); see `app/packs/README.md` |
 | `hooks/register.tsx` | The Launch Side Chess button (a Claude Code mod) |
 | `skills/side-chess/SKILL.md` | How Claude installs the app and plays |
+| `.agents/skills/side-chess/SKILL.md` | How Codex plays (same files, one move per request) |
 | `scripts/check-memory.sh` | The memory check |
 
 ## Adding a look
