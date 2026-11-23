@@ -1,0 +1,35 @@
+# Side Chess pack: the native look. On a Mac the colours below are replaced at run time by the
+# ones macOS itself uses (its accent colour, light or dark appearance, window and text colours),
+# so the window looks at home next to every other app. These values are what it falls back to
+# where the system colours can't be read (Windows and Linux for now), a plain light system look.
+name = Native
+
+background = #ECECEC
+accent = #007AFF
+title = #262626
+text = #262626
+muted = #808080
+error = #D70015
+status_your_move = #007AFF
+status_waiting = #808080
+status_over = #007AFF
+
+board_border = #3A6FCC
+light_square = #E4EEFF
+dark_square = #73B6FF
+last_from = #007AFF33
+last_to = #007AFF66
+last_outline = #007AFF
+selected = #007AFF55
+target = #007AFF77
+target_outline = #007AFF
+half_typed = #007AFF33
+move_dot = #00000040
+
+check = #D700158C
+check_outline = #D70015
+
+shade = #00000059
+banner = #ECECEC
+banner_title = #262626
+banner_result = #007AFF

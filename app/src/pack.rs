@@ -160,9 +160,12 @@ pub fn saved_pack() -> usize {
 }
 
 pub fn load_pack(index: usize) -> (Theme, Img) {
-    let theme = Theme::load(index)
+    let mut theme = Theme::load(index)
         .or_else(|_| Theme::load(pack_index(DEFAULT_PACK).unwrap_or(0)))
         .expect("the default pack loads");
+    if PACKS[index].0 == "native" {
+        crate::native::apply(&mut theme); // the system's own colours, where they can be read
+    }
     (theme, Img::from_png(PACKS[index].2))
 }
 

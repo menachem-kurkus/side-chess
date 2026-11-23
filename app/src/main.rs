@@ -14,6 +14,7 @@
 mod canvas;
 mod draw;
 mod game;
+mod native;
 mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
 mod present;
@@ -77,6 +78,7 @@ struct App {
     shot: bool,
     rails: Rails,
     rail_wins: Vec<RailWin>,
+    native_seen: Option<native::Native>, // the system colours the native look was last built from
     pack_names: Vec<String>,
 }
 
@@ -122,6 +124,7 @@ impl App {
             shot: false,
             rails: Rails::load(),
             rail_wins: vec![],
+            native_seen: None,
             pack_names: (0..PACKS.len())
                 .map(|i| {
                     Theme::load(i)
@@ -365,6 +368,9 @@ impl App {
             (self.th, self.pieces) = load_pack_for(self.pack, &screen);
             self.screen = Some(screen);
             self.sized = None;
+            if PACKS[self.pack].0 == "native" {
+                self.native_seen = native::read();
+            }
         }
         // Windows screens often run at 125% or 150%: redraw the pieces once at the
         // exact size they are shown, so a frame copies pixels instead of resampling.
@@ -499,8 +505,14 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(_)
             | WindowEvent::Moved(_)
-            | WindowEvent::ScaleFactorChanged { .. }
-            | WindowEvent::Focused(_) => {
+            | WindowEvent::ScaleFactorChanged { .. } => {
+                self.dirty = true;
+            }
+            WindowEvent::Focused(focused) => {
+                // the native look follows the system: light or dark, or a new accent colour
+                if focused && PACKS[self.pack].0 == "native" && native::read() != self.native_seen {
+                    self.screen = None;
+                }
                 self.dirty = true;
             }
             _ => {}
