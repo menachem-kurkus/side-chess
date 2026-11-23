@@ -61,4 +61,4 @@ When `turn:` starts with `game over:`, say the result in one line. Keep watching
 
 ## Keys in the window (for the user)
 
-Click a piece then a square, or type a square's letter and number (either order; half a square tints its row or column), then the target square, then Enter. Esc clears, U takes back, N starts a new game, S swaps sides (you play black, the AI white) and starts a new game, T switches the look (pack), P saves a screenshot, K and L open, close or bring back the two thin side windows beside the board (keys on the left, look on the right).
+Click a piece then a square, or type a square's letter and number (either order; half a square tints its row or column), then the target square, then Enter. Esc clears, U takes back, N starts a new game, S swaps sides (you play black, the AI white) and starts a new game, only between games (mid-game press N first), T switches the look (pack), P saves a screenshot, K and L open, close or bring back the two thin side windows beside the board (keys on the left, look on the right).
