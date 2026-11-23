@@ -274,6 +274,7 @@ fn key_rows() -> Vec<(&'static str, &'static str)> {
         ("Enter", "Play the move"),
         ("Esc", "Clear it"),
         ("U", "Take back"),
+        ("R", "Saved games"),
         ("N", "New game"),
         ("S", "Swap sides"),
         ("T", "Next look"),
@@ -749,6 +750,7 @@ mod tests {
                 piece_names: &names,
                 pieces_row: 0,
                 slide: None,
+                replay: None,
             };
             draw_panel(&mut Canvas::new(&mut px, w, h, scale), &view, p, hover);
             (px, w, h)

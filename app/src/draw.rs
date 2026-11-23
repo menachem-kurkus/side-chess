@@ -31,6 +31,7 @@ pub struct View<'a> {
     pub piece_names: &'a [String], // the piece sets in the Pieces list (after "Same as colours")
     pub pieces_row: usize,         // the row of the Pieces list in use (0 follows the colours)
     pub slide: Option<f32>,        // 0..1 while the last move's piece is sliding into place
+    pub replay: Option<&'a crate::replay::State>, // a saved game's list or a game being replayed
 }
 
 /// Where a square is drawn. The player's own pieces are at the bottom, so the
@@ -104,6 +105,9 @@ pub fn piece_tile(role: Role, side: Side) -> (f32, f32) {
 
 pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     let (th, txt) = (v.th, v.txt);
+    // in a replay the board shows the replayed game instead of the live one
+    let run = v.replay.and_then(|r| r.run.as_ref());
+    let g = run.map_or(g, |r| &r.view);
     let flip = g.player == Side::Black;
 
     // The window is one flat colour; the header is a blended band across the top
@@ -118,6 +122,20 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     txt.draw(cv, "b30", "Chess", BX + 18.0, 51.0, on_band);
     // the status sits in a capsule: gold-accent when it is your move, quiet otherwise
     let (status, capsule) = match game_over(&g.pos, g.player) {
+        _ if run.is_some() => (
+            run.map_or(String::new(), |r| {
+                if r.idx == 0 {
+                    "Replay: start".to_string()
+                } else {
+                    format!(
+                        "Replay: move {} of {}",
+                        r.idx.div_ceil(2),
+                        r.total().div_ceil(2)
+                    )
+                }
+            }),
+            band0.mix(on_band, 0.78),
+        ),
         Some(_) => ("Game over".to_string(), band0.mix(on_band, 0.78)),
         None if g.pos.turn() == g.player => (
             if g.pos.is_check() {
@@ -308,7 +326,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     }
 
     // Game over: banner across the board
-    if let Some(msg) = game_over(&g.pos, g.player) {
+    if let Some(msg) = game_over(&g.pos, g.player).filter(|_| run.is_none()) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
         let (bw, bh) = (380.0, 150.0);
         let (bx, by) = (BX + (SQ * 8.0 - bw) / 2.0, BY + (SQ * 8.0 - bh) / 2.0);
@@ -347,10 +365,22 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         parts[parts.len().saturating_sub(5)..].join("    ")
     };
     txt.draw(cv, "r16", &moves, BX, fy, th.text);
-    if !g.note.is_empty() {
+    if let Some(r) = run {
+        let help = format!(
+            "{}.  Left / Right step, Home / End jump, Esc leaves.",
+            r.title
+        );
+        txt.draw(cv, "r14", &help, BX, fy + 24.0, th.muted);
+    } else if !g.note.is_empty() {
         txt.draw(cv, "r14", &g.note, BX, fy + 24.0, th.error);
     } else if !g.hint.is_empty() {
         txt.draw(cv, "r14", &g.hint, BX, fy + 24.0, th.error);
+    }
+    if let Some(pk) = v
+        .replay
+        .and_then(|r| r.picker.as_ref().map(|p| (p, &r.error)))
+    {
+        draw_picker(cv, v, pk.0, pk.1.as_deref());
     }
     if v.show_pack_name {
         txt.draw(
@@ -362,6 +392,65 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             th.muted,
         );
     }
+}
+
+/// The list of saved games over the board: aligned columns, the chosen row in the accent.
+fn draw_picker(cv: &mut Canvas<'_>, v: &View, pk: &crate::replay::Picker, error: Option<&str>) {
+    let (th, txt) = (v.th, v.txt);
+    cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
+    let (bw, row) = (SQ * 8.0 - 40.0, 30.0);
+    let bh = 112.0 + row * crate::replay::ROWS as f32;
+    let (bx, by) = (BX + 20.0, BY + (SQ * 8.0 - bh) / 2.0);
+    cv.shadow(bx, by, bw, bh, 6);
+    cv.rrect(bx, by, bw, bh, 12.0, th.accent);
+    cv.rrect(bx, by + 6.0, bw, bh - 6.0, 12.0, th.banner);
+    txt.draw(
+        cv,
+        "b18",
+        "Saved games",
+        bx + 20.0,
+        by + 40.0,
+        th.banner_title,
+    );
+    if pk.entries.is_empty() {
+        let lines = [
+            "No saved games yet.",
+            "A game of five moves or more is saved when it ends,",
+            "when you press N, and when you quit.",
+        ];
+        for (i, l) in lines.iter().enumerate() {
+            txt.draw(
+                cv,
+                "r16",
+                l,
+                bx + 20.0,
+                by + 80.0 + 26.0 * i as f32,
+                th.banner_result,
+            );
+        }
+    }
+    let xs = [20.0, 170.0, 250.0, 370.0]; // the columns
+    let ink = th.accent.ink(th.background, th.text);
+    for (i, e) in pk
+        .entries
+        .iter()
+        .enumerate()
+        .skip(pk.top)
+        .take(crate::replay::ROWS)
+    {
+        let y = by + 60.0 + row * (i - pk.top) as f32;
+        let chosen = i == pk.sel;
+        if chosen {
+            cv.rrect(bx + 10.0, y, bw - 20.0, row - 2.0, 8.0, th.accent);
+        }
+        for (c, t) in e.cols.iter().enumerate() {
+            let colour = if chosen { ink } else { th.banner_result };
+            txt.draw(cv, "r16", t, bx + xs[c], y + 20.0, colour);
+        }
+    }
+    let foot = error.unwrap_or("Up / Down choose, Enter opens, Esc closes.");
+    let colour = if error.is_some() { th.error } else { th.muted };
+    txt.draw(cv, "r14", foot, bx + 20.0, by + bh - 16.0, colour);
 }
 
 #[cfg(test)]
@@ -429,6 +518,7 @@ mod tests {
                 piece_names: &names,
                 pieces_row: 0,
                 slide: None,
+                replay: None,
             };
             let mut cv = Canvas::new(&mut px, w, h, 2.0);
             frame(&mut cv, &g, &v);

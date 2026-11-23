@@ -19,6 +19,7 @@ mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
 mod present;
 mod rails;
+mod replay;
 mod save;
 mod text;
 
@@ -82,6 +83,7 @@ struct App {
     dots: usize,
     dirty: bool,
     shot: bool,
+    replay: replay::State,
     rails: Rails,
     rail_wins: Vec<RailWin>,
     preview: Option<usize>, // a look the pointer is on in the Look list, shown until it leaves
@@ -135,6 +137,7 @@ impl App {
             dots: 1,
             dirty: true,
             shot: false,
+            replay: replay::State::default(),
             rails: Rails::load(),
             rail_wins: vec![],
             native_seen: None,
@@ -355,6 +358,7 @@ impl App {
             piece_names: &self.piece_names,
             pieces_row: self.pieces_row(),
             slide: None,
+            replay: None,
         };
         rw.presenter.frame(w, h, scale, screen, |px| {
             let mut cv = Canvas::new(px, w, h, scale as f32);
@@ -374,6 +378,9 @@ impl App {
     }
 
     fn click(&mut self) {
+        if self.replay.active() {
+            return;
+        }
         if self.g.promotion.is_some() {
             // the box asking which piece the pawn becomes: pick one, or click away to cancel
             match promotion_at(self.mouse.0, self.mouse.1) {
@@ -409,6 +416,11 @@ impl App {
     }
 
     fn key(&mut self, key: &Key, el: &ActiveEventLoop) {
+        if self.replay.active() {
+            self.replay_key(key, el);
+            self.dirty = true;
+            return;
+        }
         // While the box asks which piece a pawn becomes, Q R B N pick, Esc cancels
         if self.g.promotion.is_some() && !self.mods.super_key() && !self.mods.control_key() {
             match key {
@@ -472,6 +484,8 @@ impl App {
                         'u' => self.g.undo(),
                         't' if PACKS.len() > 1 => self.set_pack(self.pack + 1),
                         'p' => self.shot = true,
+                        // R: look at a saved game
+                        'r' => self.replay.open_list(),
                         // K and L open, close or bring back the keys and look rails
                         'k' => {
                             self.rails.press_key(Panel::Keys);
@@ -495,6 +509,40 @@ impl App {
             _ => return,
         }
         self.dirty = true;
+    }
+
+    /// Keys while the list of saved games or a replay is open. Nothing here reaches
+    /// the live game or the AI's files.
+    fn replay_key(&mut self, key: &Key, el: &ActiveEventLoop) {
+        let quit =
+            self.mods.super_key() || (cfg!(not(target_os = "macos")) && self.mods.control_key());
+        if let Key::Character(s) = key {
+            if quit && matches!(s.to_lowercase().as_str(), "q" | "w") {
+                el.exit();
+            }
+        }
+        if let Some(run) = &mut self.replay.run {
+            match key {
+                Key::Named(NamedKey::ArrowLeft) => run.step(-1),
+                Key::Named(NamedKey::ArrowRight) => run.step(1),
+                Key::Named(NamedKey::Home) => run.goto(0),
+                Key::Named(NamedKey::End) => run.goto(run.total()),
+                Key::Named(NamedKey::Escape) => self.replay.leave(),
+                _ => {}
+            }
+        } else {
+            match key {
+                Key::Named(NamedKey::ArrowUp) => {
+                    self.replay.picker.iter_mut().for_each(|p| p.pick(-1))
+                }
+                Key::Named(NamedKey::ArrowDown) => {
+                    self.replay.picker.iter_mut().for_each(|p| p.pick(1))
+                }
+                Key::Named(NamedKey::Enter) => self.replay.open_selected(),
+                Key::Named(NamedKey::Escape) => self.replay.leave(),
+                _ => {}
+            }
+        }
     }
 
     fn redraw(&mut self) {
@@ -555,6 +603,7 @@ impl App {
             piece_names: &self.piece_names,
             pieces_row: self.pieces_row(),
             slide,
+            replay: self.replay.active().then_some(&self.replay),
         };
         let Some(screen) = &self.screen else {
             return;
@@ -678,7 +727,8 @@ impl ApplicationHandler for App {
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed && !event.repeat =>
+                if event.state == ElementState::Pressed
+                    && (!event.repeat || self.replay.active()) =>
             {
                 self.key(&event.logical_key, el);
             }
