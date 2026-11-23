@@ -1,6 +1,7 @@
 //! Replaying saved games: reading a PGN, listing the games in ~/.side-chess/games,
 //! and stepping through one. A replay has its own `Game` for the board to show; it
 //! never touches the live game or the files shared with the AI (state.txt).
+use crate::engine::{self, Engine, Eval, Grade};
 use crate::game::{shown_to, Game};
 use crate::save::games_dir;
 use shakmaty::{fen::Fen, san::San, CastlingMode, Chess, Color as Side, Move, Position, Square};
@@ -119,6 +120,9 @@ pub struct Run {
     sans: Vec<String>,
     pub idx: usize,
     pub title: String,
+    engine: Option<Engine>,
+    pub evals: Vec<Option<Eval>>, // what the engine thinks of each position, as it gets there
+    pub engine_missing: bool,     // no Stockfish was found
 }
 
 impl Run {
@@ -140,9 +144,77 @@ impl Run {
             sans,
             idx: 0,
             title,
+            engine: None,
+            evals: vec![],
+            engine_missing: false,
         };
         run.goto(0);
         run
+    }
+
+    /// Ask the engine at `path` about every position, in the background.
+    pub fn start_analysis(&mut self, path: std::path::PathBuf) {
+        let fens = self
+            .positions
+            .iter()
+            .map(|p| Fen::from_position(p.clone(), shakmaty::EnPassantMode::Legal).to_string())
+            .collect();
+        self.evals = vec![None; self.positions.len()];
+        self.engine = Some(Engine::start(path, fens));
+    }
+
+    /// Take in what the engine has finished since the last look; true if anything came.
+    pub fn poll(&mut self) -> bool {
+        let Some(e) = &self.engine else { return false };
+        let mut got = false;
+        while let Ok((i, eval)) = e.results.try_recv() {
+            if let Some(slot) = self.evals.get_mut(i) {
+                *slot = Some(eval);
+                got = true;
+            }
+        }
+        got
+    }
+
+    pub fn analysed(&self) -> usize {
+        self.evals.iter().filter(|e| e.is_some()).count()
+    }
+
+    pub fn analysing(&self) -> bool {
+        self.engine.is_some()
+    }
+
+    pub fn eval_here(&self) -> Option<&Eval> {
+        self.evals.get(self.idx)?.as_ref()
+    }
+
+    /// What move number `i` (1 is the first) cost the side that played it, once the
+    /// engine has scored the positions before and after it.
+    pub fn loss_at(&self, i: usize) -> Option<i32> {
+        let (before, after) = (self.evals.get(i.checked_sub(1)?)?, self.evals.get(i)?);
+        let mover = self.positions.get(i - 1)?.turn();
+        Some(engine::loss(before.as_ref()?, after.as_ref()?, mover))
+    }
+
+    pub fn grade_at(&self, i: usize) -> Option<(Grade, i32)> {
+        let l = self.loss_at(i)?;
+        Some((engine::grade(l), l))
+    }
+
+    /// The nearest move before (`dir` -1) or after (+1) this one that is an
+    /// inaccuracy or worse, if the engine has scored that far.
+    pub fn next_mark(&self, dir: isize) -> Option<usize> {
+        let mut i = self.idx as isize + dir;
+        while i >= 1 && i as usize <= self.total() {
+            if self
+                .grade_at(i as usize)
+                .is_some_and(|g| g.0 != Grade::Fine)
+            {
+                return Some(i as usize);
+            }
+            i += dir;
+        }
+        None
     }
 
     pub fn total(&self) -> usize {
@@ -244,6 +316,7 @@ pub struct State {
     pub picker: Option<Picker>,
     pub run: Option<Run>,
     pub error: Option<String>,
+    pub engine_found: bool, // whether a Stockfish exists, so the list can say how to get one
 }
 
 impl State {
@@ -253,6 +326,7 @@ impl State {
 
     pub fn open_list(&mut self) {
         self.error = None;
+        self.engine_found = engine::find_engine().is_some();
         self.picker = Some(Picker {
             entries: list_games(),
             sel: 0,
@@ -272,7 +346,12 @@ impl State {
             .and_then(|t| parse_pgn(&t));
         match loaded {
             Ok(p) => {
-                self.run = Some(Run::new(&p, e.cols[0].clone()));
+                let mut run = Run::new(&p, e.cols[0].clone());
+                match engine::find_engine() {
+                    Some(path) => run.start_analysis(path),
+                    None => run.engine_missing = true,
+                }
+                self.run = Some(run);
                 self.picker = None;
                 self.error = None;
             }
@@ -394,5 +473,70 @@ mod tests {
         let e = entry(f).unwrap();
         assert_eq!(e.cols, ["2026-11-23 14:05", "Black", "Lost", "1 move"]);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn moves_are_graded_and_marks_can_be_jumped_to() {
+        let p = parse_pgn("1. e4 e5 2. Nf3 Nc6 3. Bb5 *").unwrap();
+        let mut r = Run::new(&p, String::new());
+        let ev = |cp| {
+            Some(Eval {
+                cp,
+                mate: None,
+                best: None,
+            })
+        };
+        // after 1.e4 level, 1...e5 level, 2.Nf3 level, 2...Nc6 drops 150 for black, 3.Bb5 level
+        r.evals = vec![ev(0), ev(20), ev(10), ev(15), ev(165), ev(160)];
+        assert_eq!(r.grade_at(1), Some((Grade::Fine, 0)));
+        assert_eq!(
+            r.grade_at(4),
+            Some((Grade::Blunder, 0)).map(|_| (Grade::Mistake, 150))
+        );
+        assert_eq!(r.loss_at(0), None);
+        r.goto(0);
+        assert_eq!(r.next_mark(1), Some(4));
+        r.goto(5);
+        assert_eq!(r.next_mark(-1), Some(4));
+        r.goto(4);
+        assert_eq!(r.next_mark(1), None);
+        r.evals[5] = None;
+        assert_eq!(r.grade_at(5), None, "not scored yet");
+    }
+
+    /// Ann's six earlier games, from her review notes (read only; skipped where the file
+    /// is not there). Each move list must replay legally from the standard start, and
+    /// the finished games must end in checkmate.
+    #[test]
+    fn her_six_earlier_games_import() {
+        let Some(home) = std::env::var_os("HOME") else {
+            return;
+        };
+        let path = std::path::Path::new(&home).join("Documents/Chess/Game Reviews.md");
+        let Ok(text) = fs::read_to_string(path) else {
+            return;
+        };
+        let lists: Vec<&str> = text
+            .lines()
+            .filter(|l| l.starts_with("`1. "))
+            .map(|l| l.trim_matches('`'))
+            .collect();
+        assert_eq!(lists.len(), 6, "six move lists in the notes");
+        for (n, moves) in lists.iter().enumerate() {
+            let black = n == 5; // in game 6 she played black
+            let pgn = format!(
+                "[White \"{}\"]\n[Black \"{}\"]\n\n{moves}\n",
+                if black { "AI" } else { "You" },
+                if black { "You" } else { "AI" },
+            );
+            let p = parse_pgn(&pgn).unwrap_or_else(|e| panic!("game {}: {e}", n + 1));
+            assert_eq!(p.player(), if black { Side::Black } else { Side::White });
+            let mut r = Run::new(&p, String::new());
+            r.goto(r.total());
+            if matches!(n, 0 | 3 | 5) {
+                assert!(r.view.pos.is_checkmate(), "game {} ends in mate", n + 1);
+            }
+            assert!(r.total() >= 14, "game {} has its moves", n + 1);
+        }
     }
 }

@@ -331,6 +331,11 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         draw_threats(cv, g, v, flip);
     }
 
+    // The engine's view in a replay: the bar, a mark on a weak move, the best move
+    if let Some(r) = run {
+        draw_engine(cv, g, v, r, flip);
+    }
+
     // Game over: banner across the board
     if let Some(msg) = game_over(&g.pos, g.player).filter(|_| run.is_none()) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
@@ -368,15 +373,40 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     } else {
         let all = move_list(&g.sans);
         let parts: Vec<&str> = all.split("  ").collect();
-        parts[parts.len().saturating_sub(5)..].join("    ")
+        let keep = if run.is_some_and(|r| r.analysing()) {
+            4
+        } else {
+            5
+        };
+        parts[parts.len().saturating_sub(keep)..].join("    ")
     };
     txt.draw(cv, "r16", &moves, BX, fy, th.text);
     if let Some(r) = run {
-        let help = format!(
-            "{}.  Left / Right step, Home / End jump, Esc leaves.",
-            r.title
-        );
+        // what the engine made of the move just played, else the date of the game
+        let verdict = match (r.idx, r.grade_at(r.idx), g.sans.last()) {
+            (1.., Some((grade, l)), Some(san)) if grade != crate::engine::Grade::Fine => {
+                format!(
+                    "{san}: {} (cost {:.1} pawns).",
+                    grade.word(),
+                    l as f32 / 100.0
+                )
+            }
+            (1.., Some(_), Some(san)) => format!("{san}: fine."),
+            _ => format!("{}.", r.title),
+        };
+        let keys = if !r.analysing() {
+            "Left / Right step, Esc leaves.".to_string()
+        } else if r.analysed() < r.evals.len() {
+            format!("Rating {} of {}...", r.analysed(), r.evals.len())
+        } else {
+            "Up / Down: marked moves. Esc leaves.".to_string()
+        };
+        let help = format!("{verdict}  {keys}");
         txt.draw(cv, "r14", &help, BX, fy + 24.0, th.muted);
+        if let Some(e) = r.eval_here() {
+            let t = e.text();
+            txt.draw(cv, "b18", &t, W - BX - txt.width("b18", &t), fy, th.text);
+        }
     } else if !g.note.is_empty() {
         txt.draw(cv, "r14", &g.note, BX, fy + 24.0, th.error);
     } else if !g.hint.is_empty() {
@@ -386,7 +416,13 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         .replay
         .and_then(|r| r.picker.as_ref().map(|p| (p, &r.error)))
     {
-        draw_picker(cv, v, pk.0, pk.1.as_deref());
+        draw_picker(
+            cv,
+            v,
+            pk.0,
+            pk.1.as_deref(),
+            v.replay.is_some_and(|r| r.engine_found),
+        );
     }
     if v.show_pack_name {
         txt.draw(
@@ -396,6 +432,62 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             W - BX - txt.width("r14", &th.name),
             fy,
             th.muted,
+        );
+    }
+}
+
+/// The evaluation bar beside the board, a mark on the last move when it was weak,
+/// and an arrow for the engine's move in the position shown.
+fn draw_engine(cv: &mut Canvas<'_>, g: &Game, v: &View, r: &crate::replay::Run, flip: bool) {
+    let th = v.th;
+    let Some(e) = r.eval_here() else { return };
+    // the bar: white's share rises from white's side of the board
+    let (bx, bw, by, bh) = (7.0, 12.0, BY, SQ * 8.0);
+    let share = 1.0 / (1.0 + (-(e.cp as f32) / 300.0).exp()); // 0.5 when level, near 1 when winning
+    let white_h = bh * share;
+    cv.rect(bx, by, bw, bh, th.board_border);
+    if flip {
+        cv.rect(bx, by, bw, white_h, th.light_square);
+    } else {
+        cv.rect(bx, by + bh - white_h, bw, white_h, th.light_square);
+    }
+    cv.rect(bx, by + bh / 2.0 - 0.5, bw, 1.0, th.accent);
+    // a weak move gets a small badge on the square it moved to
+    if let (Some((grade, _)), Some((_, to))) = (r.grade_at(r.idx), g.last) {
+        if grade != crate::engine::Grade::Fine {
+            let colour = if grade == crate::engine::Grade::Inaccuracy {
+                th.status_over
+            } else {
+                th.error
+            };
+            let (x, y) = square_xy(to, flip);
+            let mark = grade.mark();
+            let w = v.txt.width("b11", mark) + 10.0;
+            cv.rrect(x + SQ - w - 2.0, y + 2.0, w, 18.0, 9.0, colour);
+            v.txt.draw(
+                cv,
+                "b11",
+                mark,
+                x + SQ - w + 3.0,
+                y + 15.0,
+                colour.ink(th.light_square, th.board_border),
+            );
+        }
+    }
+    // the engine's move, as an arrow in the look's accent
+    if let (Some((from, to)), None) = (e.best, game_over(&g.pos, g.player)) {
+        let (fx, fy) = square_xy(from, flip);
+        let (tx, ty) = square_xy(to, flip);
+        let half = SQ / 2.0;
+        cv.arrow(
+            (fx + half, fy + half),
+            (tx + half, ty + half),
+            8.0,
+            20.0,
+            Color {
+                a: 0.8,
+                ..th.accent
+            },
         );
     }
 }
@@ -439,11 +531,17 @@ fn draw_threats(cv: &mut Canvas<'_>, g: &Game, v: &View, flip: bool) {
 }
 
 /// The list of saved games over the board: aligned columns, the chosen row in the accent.
-fn draw_picker(cv: &mut Canvas<'_>, v: &View, pk: &crate::replay::Picker, error: Option<&str>) {
+fn draw_picker(
+    cv: &mut Canvas<'_>,
+    v: &View,
+    pk: &crate::replay::Picker,
+    error: Option<&str>,
+    engine_found: bool,
+) {
     let (th, txt) = (v.th, v.txt);
     cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
     let (bw, row) = (SQ * 8.0 - 40.0, 30.0);
-    let bh = 112.0 + row * crate::replay::ROWS as f32;
+    let bh = 138.0 + row * crate::replay::ROWS as f32;
     let (bx, by) = (BX + 20.0, BY + (SQ * 8.0 - bh) / 2.0);
     cv.shadow(bx, by, bw, bh, 6);
     cv.rrect(bx, by, bw, bh, 12.0, th.accent);
@@ -490,6 +588,22 @@ fn draw_picker(cv: &mut Canvas<'_>, v: &View, pk: &crate::replay::Picker, error:
         for (c, t) in e.cols.iter().enumerate() {
             let colour = if chosen { ink } else { th.banner_result };
             txt.draw(cv, "r16", t, bx + xs[c], y + 20.0, colour);
+        }
+    }
+    if !engine_found {
+        let lines = [
+            "To rate the moves, install Stockfish (free). Put it on your PATH",
+            "or in ~/.side-chess/engine/. Replays work without it.",
+        ];
+        for (i, l) in lines.iter().enumerate() {
+            txt.draw(
+                cv,
+                "r14",
+                l,
+                bx + 20.0,
+                by + bh - 62.0 + 18.0 * i as f32,
+                th.muted,
+            );
         }
     }
     let foot = error.unwrap_or("Up / Down choose, Enter opens, Esc closes.");

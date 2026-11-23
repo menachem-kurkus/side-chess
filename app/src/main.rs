@@ -13,6 +13,7 @@
 //!   main.rs   the window, keys and mouse (this file)
 mod canvas;
 mod draw;
+mod engine;
 mod game;
 mod native;
 mod pack;
@@ -536,6 +537,17 @@ impl App {
                 Key::Named(NamedKey::ArrowRight) => run.step(1),
                 Key::Named(NamedKey::Home) => run.goto(0),
                 Key::Named(NamedKey::End) => run.goto(run.total()),
+                // Up and Down: the previous and the next move the engine marked
+                Key::Named(NamedKey::ArrowUp) => {
+                    if let Some(i) = run.next_mark(-1) {
+                        run.goto(i);
+                    }
+                }
+                Key::Named(NamedKey::ArrowDown) => {
+                    if let Some(i) = run.next_mark(1) {
+                        run.goto(i);
+                    }
+                }
                 Key::Named(NamedKey::Escape) => self.replay.leave(),
                 _ => {}
             }
@@ -780,6 +792,9 @@ impl ApplicationHandler for App {
 
     // Between events: look for the opponent's move, a screenshot request, and time-based changes.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if self.replay.run.as_mut().is_some_and(|r| r.poll()) {
+            self.dirty = true; // the engine finished another position
+        }
         let before = (self.g.sans.len(), self.g.note.clone());
         check_opponent_move(&mut self.g);
         self.autosave();
