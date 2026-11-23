@@ -599,19 +599,19 @@ mod tests {
         );
     }
 
-    /// Scores her game 1 (from the review notes) with a real Stockfish and prints both sides.
-    /// Run by hand: cargo test score_game_one -- --ignored --nocapture
+    /// Scores a full game (an Italian Four Knights, 36 moves, embedded here) with a real
+    /// Stockfish and prints both sides. Run by hand:
+    /// cargo test score_a_whole_game -- --ignored --nocapture
     #[test]
     #[ignore]
-    fn score_game_one_with_real_stockfish() {
+    fn score_a_whole_game_with_real_stockfish() {
         let path = engine::find_engine().expect("no Stockfish found");
-        let home = std::env::var("HOME").unwrap();
-        let text = fs::read_to_string(format!("{home}/Documents/Chess/Game Reviews.md")).unwrap();
-        let moves = text
-            .lines()
-            .find(|l| l.starts_with("`1. "))
-            .unwrap()
-            .trim_matches('`');
+        let moves = "1. e4 e5 2. Nf3 Nc6 3. Nc3 Nf6 4. Bc4 Bc5 5. Nb5 Nxe4 6. O-O d5 7. Bd3 O-O \
+            8. Bxe4 dxe4 9. d4 exf3 10. dxc5 Qxd1 11. Rxd1 fxg2 12. f4 Bg4 13. Rd3 Rac8 \
+            14. fxe5 Nxe5 15. Rg3 Nf3+ 16. Kxg2 Ne5 17. b4 Rfe8 18. Bb2 Be6 19. Bxe5 f6 \
+            20. Bc3 Bd5+ 21. Kg1 Re2 22. Rd1 Bxa2 23. Nd4 Re7 24. Nf5 Re5 25. Bxe5 fxe5 \
+            26. Ne7+ Kf7 27. Nxc8 Be6 28. Nxa7 c6 29. Rf1+ Ke7 30. Rxg7+ Ke8 31. Rxb7 Bc4 \
+            32. Rf6 Ba6 33. Rxh7 Bc8 34. Nxc8 e4 35. Nd6+ Kd8 36. Rf8#";
         let p = parse_pgn(moves).unwrap();
         let mut r = Run::new(&p, String::new());
         r.start_analysis(path);
