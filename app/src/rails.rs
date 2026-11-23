@@ -28,6 +28,7 @@ pub enum Mode {
 pub enum Hit {
     Toggle, // open a rail, or fold an open panel back to its rail
     Hide,
+    Pick(usize), // a look in the Look panel's list (the app switches to it)
 }
 
 pub const RAIL_W: f32 = 26.0;
@@ -37,6 +38,8 @@ const GAP: f32 = 6.0; // between a rail window and the board window
 pub const TOP: f32 = BY - 4.0; // level with the board's border, from the board window's top
 pub const LEN: f32 = SQ * 8.0 + 8.0; // as tall as the board and its border
 const HEAD: f32 = 34.0;
+const ROW: f32 = 30.0; // one look in the Look list
+const LIST_TOP: f32 = HEAD + 40.0; // where the list of looks starts
 const BTN: f32 = 26.0; // the buttons in an open panel's header
 const CROSS_BOX: f32 = 22.0; // the hide cross's hit box at the foot of a thin rail
 
@@ -174,6 +177,18 @@ impl Rails {
         match self.mode(p) {
             Mode::Rail => Some(Hit::Toggle),
             Mode::Open if inside(toggle) => Some(Hit::Toggle),
+            Mode::Open if p == Panel::Look => {
+                // the list of looks: one row each, the whole width of the panel
+                let n = crate::pack::PACKS.len();
+                let w = Rails::width_of(p, Mode::Open);
+                let (top, row) = (LIST_TOP, ROW);
+                let i = ((y - top) / row).floor();
+                (0.0..=w)
+                    .contains(&x)
+                    .then_some(i)
+                    .filter(|i| *i >= 0.0 && (*i as usize) < n)
+                    .map(|i| Hit::Pick(i as usize))
+            }
             _ => None,
         }
     }
@@ -189,7 +204,8 @@ impl Rails {
                 self.set(p, Mode::Hidden);
                 true
             }
-            None => false,
+            // picking a look changes the app's look, not the rails: the app does it
+            Some(Hit::Pick(_)) | None => false,
         }
     }
 
@@ -446,6 +462,21 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
             txt.draw(cv, "r14", "Looks", 14.0, top + 28.0, th.muted);
             for (i, name) in v.pack_names.iter().enumerate() {
                 let y = top + 58.0 + i as f32 * 30.0;
+                if hover == Some(Hit::Pick(i)) {
+                    // the pointer is on this look: the board shows it too, a click keeps it
+                    cv.rect(
+                        6.0,
+                        LIST_TOP + i as f32 * ROW + 1.0,
+                        w - 12.0,
+                        ROW - 2.0,
+                        th.half_typed,
+                    );
+                    if i == v.pack {
+                        cv.rect(14.0, y - 16.0, 4.0, 22.0, th.accent); // still the chosen one
+                    }
+                    txt.draw(cv, "r16", name, 28.0, y, th.title);
+                    continue;
+                }
                 if i == v.pack {
                     cv.rect(14.0, y - 16.0, 4.0, 22.0, th.accent);
                     txt.draw(cv, "r16", name, 28.0, y, th.title);
@@ -566,6 +597,31 @@ mod tests {
         let (_, hide) = r.buttons(Panel::Look);
         assert!(r.click(Panel::Look, hide.0 + hide.2 / 2.0, hide.1 + hide.2 / 2.0));
         assert_eq!(r.look, Mode::Hidden);
+    }
+
+    #[test]
+    fn each_look_in_the_list_is_picked_by_where_you_point() {
+        let mut r = Rails::new();
+        r.look = Mode::Open;
+        let n = crate::pack::PACKS.len();
+        // the middle of each row picks that look, anywhere across the panel
+        for i in 0..n {
+            let y = LIST_TOP + ROW * i as f32 + ROW / 2.0;
+            assert_eq!(r.hit(Panel::Look, 20.0, y), Some(Hit::Pick(i)), "row {i}");
+            assert_eq!(r.hit(Panel::Look, LOOK_W - 10.0, y), Some(Hit::Pick(i)));
+        }
+        // above the list and below it nothing is picked
+        assert_eq!(r.hit(Panel::Look, 20.0, LIST_TOP - 5.0), None);
+        assert_eq!(
+            r.hit(Panel::Look, 20.0, LIST_TOP + ROW * n as f32 + 5.0),
+            None
+        );
+        // the rails themselves don't change when a look is picked: the app does that
+        assert!(!r.click(Panel::Look, 20.0, LIST_TOP + 5.0));
+        assert_eq!(r.look, Mode::Open);
+        // the Keys panel has no list
+        r.keys = Mode::Open;
+        assert_eq!(r.hit(Panel::Keys, 20.0, LIST_TOP + 5.0), None);
     }
 
     #[test]

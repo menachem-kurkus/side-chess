@@ -81,8 +81,9 @@ struct App {
     shot: bool,
     rails: Rails,
     rail_wins: Vec<RailWin>,
-    rails_away: bool,  // the rails are out of sight because the board is minimised
-    prev_moves: usize, // how many moves the last frame had
+    preview: Option<usize>, // a look the pointer is on in the Look list, shown until it leaves
+    rails_away: bool,       // the rails are out of sight because the board is minimised
+    prev_moves: usize,      // how many moves the last frame had
     slide_from: Option<Instant>, // when the last move's slide began
     native_seen: Option<native::Native>, // the system colours the native look was last built from
     pack_names: Vec<String>,
@@ -131,6 +132,7 @@ impl App {
             rails: Rails::load(),
             rail_wins: vec![],
             native_seen: None,
+            preview: None,
             rails_away: false,
             prev_moves: 0,
             slide_from: None,
@@ -141,6 +143,32 @@ impl App {
                         .unwrap_or_else(|_| PACKS[i].0.to_string())
                 })
                 .collect(),
+        }
+    }
+
+    /// The look on screen: the one under the pointer in the Look list, else the chosen one.
+    fn shown_pack(&self) -> usize {
+        self.preview.unwrap_or(self.pack)
+    }
+
+    /// Choose a look (T, or a click in the Look list) and remember it.
+    fn set_pack(&mut self, i: usize) {
+        self.pack = i % PACKS.len();
+        self.preview = None;
+        self.screen = None; // the next redraw loads it for this screen
+        let _ = fs::create_dir_all(live_dir());
+        let _ = fs::write(live_dir().join("pack.txt"), PACKS[self.pack].0);
+        self.pack_shown_at = Some(Instant::now());
+        self.dirty = true;
+    }
+
+    /// Show a look while the pointer is on it in the list (None when it leaves).
+    fn preview_pack(&mut self, i: Option<usize>) {
+        let i = i.filter(|i| *i != self.pack);
+        if i != self.preview {
+            self.preview = i;
+            self.screen = None;
+            self.dirty = true;
         }
     }
 
@@ -329,13 +357,7 @@ impl App {
                         // swap sides: only between games (refused mid-game: press N first)
                         's' => self.g.swap_sides(),
                         'u' => self.g.undo(),
-                        't' if PACKS.len() > 1 => {
-                            self.pack = (self.pack + 1) % PACKS.len();
-                            self.screen = None; // the next redraw loads it for this screen
-                            let _ = fs::create_dir_all(live_dir());
-                            let _ = fs::write(live_dir().join("pack.txt"), PACKS[self.pack].0);
-                            self.pack_shown_at = Some(Instant::now());
-                        }
+                        't' if PACKS.len() > 1 => self.set_pack(self.pack + 1),
                         'p' => self.shot = true,
                         // K and L open, close or bring back the keys and look rails
                         'k' => {
@@ -375,10 +397,10 @@ impl App {
         // New screen (or new pack): convert the pack's colours for this screen.
         let screen = presenter.screen();
         if self.screen.as_ref() != Some(&screen) {
-            (self.th, self.pieces) = load_pack_for(self.pack, &screen);
+            (self.th, self.pieces) = load_pack_for(self.shown_pack(), &screen);
             self.screen = Some(screen);
             self.sized = None;
-            if PACKS[self.pack].0 == "native" {
+            if PACKS[self.shown_pack()].0 == "native" {
                 self.native_seen = native::read();
             }
         }
@@ -489,6 +511,10 @@ impl ApplicationHandler for App {
                         r.hover = hover;
                         self.dirty = true;
                     }
+                    self.preview_pack(match hover {
+                        Some(Hit::Pick(i)) => Some(i),
+                        _ => None,
+                    });
                 }
                 None => {
                     let s = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
@@ -500,6 +526,7 @@ impl ApplicationHandler for App {
                     if self.rail_wins[i].hover.take().is_some() {
                         self.dirty = true;
                     }
+                    self.preview_pack(None);
                 }
             }
             WindowEvent::MouseInput {
@@ -510,7 +537,9 @@ impl ApplicationHandler for App {
                 match rail {
                     Some(i) => {
                         let (p, (x, y)) = (self.rail_wins[i].panel, self.rail_wins[i].mouse);
-                        if self.rails.click(p, x, y) {
+                        if let Some(Hit::Pick(k)) = self.rails.hit(p, x, y) {
+                            self.set_pack(k); // a click keeps the look the pointer is on
+                        } else if self.rails.click(p, x, y) {
                             self.rails_changed(el);
                         }
                     }
@@ -538,7 +567,10 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(focused) => {
                 // the native look follows the system: light or dark, or a new accent colour
-                if focused && PACKS[self.pack].0 == "native" && native::read() != self.native_seen {
+                if focused
+                    && PACKS[self.shown_pack()].0 == "native"
+                    && native::read() != self.native_seen
+                {
                     self.screen = None;
                 }
                 self.dirty = true;
