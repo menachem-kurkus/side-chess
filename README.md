@@ -59,6 +59,35 @@ The install scripts build and install the app; Claude runs them for you, and you
 
 Each script records the installed version in `~/.side-chess/app_version.txt`. Both skills read it when a game starts and rebuild (Claude) or offer to rebuild (Codex) an app that is older than they are.
 
+### Stockfish (optional, for move ratings)
+
+Replays can mark inaccuracies, mistakes and blunders and show an evaluation bar and your accuracy, but only if the app can find the chess engine [Stockfish](https://stockfishchess.org/download/) (free, open source, GPL-3.0). It is a separate program the app does not ship. Without it everything else works the same, and the replay list says where to put it.
+
+**Where the app looks, in this order:**
+
+1. `~/.side-chess/engine/stockfish` (Mac, Linux) or `%USERPROFILE%\.side-chess\engine\stockfish.exe` (Windows). This is the place to put it.
+2. Any folder on your `PATH` (for example after `brew install stockfish` or `sudo apt install stockfish`).
+3. On Mac and Linux also `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/games` and `/usr/bin`, because a window opened from the Dock or a menu has a short `PATH`.
+
+The file must be named exactly `stockfish` (`stockfish.exe` on Windows): rename the download if it has a longer name such as `stockfish-windows-x86-64-avx2.exe`. Make it runnable on Mac and Linux with `chmod +x`. To try it by hand, run it and type `uci`: it should answer `uciok`. Nothing else needs to be set up, and you do not need to restart anything but the replay (leave it with Esc and open it again).
+
+Windows example (PowerShell), after unzipping the download:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.side-chess\engine"
+Copy-Item .\stockfish-windows-x86-64-avx2.exe "$env:USERPROFILE\.side-chess\engine\stockfish.exe"
+```
+
+Mac and Linux example:
+
+```bash
+mkdir -p ~/.side-chess/engine
+cp ./stockfish-macos-m1-apple-silicon ~/.side-chess/engine/stockfish
+chmod +x ~/.side-chess/engine/stockfish
+```
+
+The engine runs only while a replay is open, with one thread and 16 MB of hash, and stops when you leave the replay, so it does not add to the app's memory while you play. Its licence travels with it: keep Stockfish's `Copying.txt` next to the program if you pass it on.
+
 ### Codex
 
 Codex finds the skill on its own when you open it in this repository. To use it anywhere, copy `.agents/skills/side-chess` into your Codex skills folder (`%USERPROFILE%\.agents\skills\side-chess` on Windows, or `~/.agents/skills/side-chess` on macOS and Linux), then restart Codex. Install the app first (above), open Side Chess from Applications, the Start Menu or your Linux app menu, and ask Codex to play Side Chess. If Codex asks for access, allow it to read and write `~/.side-chess` (on Windows, `%USERPROFILE%\.side-chess`). No API key is needed. After each of your moves, ask Codex "your move" or "continue Side Chess"; Codex does not run in the background between turns.
