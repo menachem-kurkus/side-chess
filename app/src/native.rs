@@ -83,9 +83,13 @@ fn col(c: [u8; 3], a: u8) -> Color {
 /// Lays the system's colours over the native pack. Where they can't be read the
 /// pack's own colours stay.
 pub fn apply(th: &mut Theme) {
-    let Some(n) = read() else {
-        return;
-    };
+    if let Some(n) = read() {
+        apply_to(th, &n);
+    }
+}
+
+/// The same, from colours already read (so a test can use made-up ones).
+fn apply_to(th: &mut Theme, n: &Native) {
     let (white, black) = ([255u8; 3], [0u8; 3]);
     th.background = col(n.background, 255);
     th.text = col(n.text, 255);
@@ -136,12 +140,47 @@ mod tests {
         assert_eq!(mix([0, 100, 200], [100, 200, 0], 0.5), [50, 150, 100]);
     }
 
+    fn made_up(dark: bool) -> Native {
+        if dark {
+            Native {
+                dark,
+                background: [30, 30, 30],
+                text: [255, 255, 255],
+                muted: [190, 190, 190],
+                accent: [10, 132, 255],
+            }
+        } else {
+            Native {
+                dark,
+                background: [236, 236, 236],
+                text: [38, 38, 38],
+                muted: [128, 128, 128],
+                accent: [0, 122, 255],
+            }
+        }
+    }
+
+    // Made-up system colours, not the real ones: reading them needs the main thread.
     #[test]
-    fn applying_the_native_look_never_breaks_the_theme() {
+    fn the_native_look_follows_light_and_dark_and_keeps_the_pieces_readable() {
         let i = crate::pack::pack_index("native").expect("the native pack exists");
-        let mut th = Theme::load(i).unwrap();
-        apply(&mut th); // reads the system on a Mac, does nothing elsewhere
-        assert_eq!(th.name, "Native");
-        assert!(th.light_square.r > 0.0 || th.light_square.g > 0.0);
+        for dark in [false, true] {
+            let mut th = Theme::load(i).unwrap();
+            let n = made_up(dark);
+            apply_to(&mut th, &n);
+            assert_eq!(th.name, "Native");
+            // the window follows the system's background and text
+            assert!((th.background.luma() < 0.5) == dark, "dark={dark}");
+            assert!((th.text.luma() > 0.5) == dark, "dark={dark}");
+            // black pieces must show on the dark squares and white ones on the light squares
+            assert!(
+                th.dark_square.luma() > 0.30,
+                "dark={dark}: {}",
+                th.dark_square.luma()
+            );
+            assert!(th.light_square.luma() > th.dark_square.luma());
+            // the accent is the system's
+            assert_eq!(th.accent, col(n.accent, 255));
+        }
     }
 }
