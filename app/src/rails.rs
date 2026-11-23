@@ -45,10 +45,38 @@ pub fn on_left(p: Panel) -> bool {
     p == Panel::Keys
 }
 
+/// How the rails look (Ann picks from a sheet of these).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RailStyle {
+    Pale,  // a light strip with a blue outline
+    Spine, // a blue strip with a gold edge facing the board
+    Tab,   // a light strip with a blue tab at the top
+    Dots,  // a dark strip with three dots and no words
+}
+
+pub const STYLES: [RailStyle; 4] = [
+    RailStyle::Pale,
+    RailStyle::Spine,
+    RailStyle::Tab,
+    RailStyle::Dots,
+];
+
+impl RailStyle {
+    fn name(self) -> &'static str {
+        match self {
+            RailStyle::Pale => "pale",
+            RailStyle::Spine => "spine",
+            RailStyle::Tab => "tab",
+            RailStyle::Dots => "dots",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Rails {
     pub keys: Mode,
     pub look: Mode,
+    pub style: RailStyle,
 }
 
 /// A button's box: x, y, size.
@@ -59,6 +87,7 @@ impl Rails {
         Rails {
             keys: Mode::Rail,
             look: Mode::Rail,
+            style: RailStyle::Spine,
         }
     }
 
@@ -166,7 +195,12 @@ impl Rails {
             Mode::Rail => "rail",
             Mode::Open => "open",
         };
-        format!("keys = {}\nlook = {}\n", name(self.keys), name(self.look))
+        format!(
+            "keys = {}\nlook = {}\nstyle = {}\n",
+            name(self.keys),
+            name(self.look),
+            self.style.name()
+        )
     }
 
     pub fn from_text(text: &str) -> Rails {
@@ -175,6 +209,12 @@ impl Rails {
             let Some((k, v)) = line.split_once('=') else {
                 continue;
             };
+            if k.trim() == "style" {
+                if let Some(st) = STYLES.into_iter().find(|st| st.name() == v.trim()) {
+                    r.style = st;
+                }
+                continue;
+            }
             let m = match v.trim() {
                 "hidden" => Mode::Hidden,
                 "rail" => Mode::Rail,
@@ -237,23 +277,22 @@ fn cross(cv: &mut Canvas<'_>, cx: f32, cy: f32, d: f32, t: f32, ink: Color) {
     cv.line(cx - d, cy + d, cx + d, cy - d, t, ink);
 }
 
-/// A square button for an open panel's dark header: an outline, filling with the
-/// accent when the pointer is over it. `fold` is the arrow's direction (+1 right,
-/// -1 left); `None` makes it the hide cross.
-fn header_button(cv: &mut Canvas<'_>, th: &Theme, (x, y, s): Box3, fold: Option<f32>, hover: bool) {
-    cv.rect(x, y, s, s, th.light_square);
-    cv.rect(
-        x + 1.5,
-        y + 1.5,
-        s - 3.0,
-        s - 3.0,
-        if hover { th.accent } else { th.board_border },
-    );
-    let ink = if hover {
-        th.board_border
-    } else {
-        th.light_square
-    };
+/// A square button in an open panel's header: an outline, filling with the accent when
+/// the pointer is over it. `fold` is the arrow's direction (+1 right, -1 left); `None`
+/// makes it the hide cross.
+fn header_button(
+    cv: &mut Canvas<'_>,
+    th: &Theme,
+    (x, y, s): Box3,
+    fold: Option<f32>,
+    hover: bool,
+    (edge, ink, hover_ink): (Color, Color, Color),
+) {
+    if hover {
+        cv.rect(x, y, s, s, th.accent);
+    }
+    cv.rect_lines(x, y, s, s, 1.5, edge);
+    let ink = if hover { hover_ink } else { ink };
     let (cx, cy) = (x + s / 2.0, y + s / 2.0);
     match fold {
         Some(dir) => chevron(cv, cx - dir, cy, dir, s * 0.17, 2.4, ink),
@@ -269,25 +308,81 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
     let open = mode == Mode::Open;
     let left = on_left(p);
     let (toggle, hide) = v.rails.buttons(p);
-    cv.clear(th.board_border);
+    let st = v.rails.style;
+    let band0 = th.board_border;
+    let band1 = band0.mix(Color::rgba8(0, 0, 0, 255), 0.72);
+    let on_band = band0.ink(th.background, th.text);
     let (title, label) = match p {
         Panel::Keys => ("Keys", "KEYS"),
         Panel::Look => ("Look", "LOOK"),
     };
+    let out = if left { -1.0 } else { 1.0 }; // the way a rail opens, away from the board
+    let on = hover == Some(Hit::Toggle);
+    let hot = hover == Some(Hit::Hide);
+    let (hx, hy) = (hide.0 + hide.2 / 2.0, hide.1 + hide.2 / 2.0);
     if !open {
-        // A thin strip, and all of it is the button that opens it: it fills with the
-        // accent under the pointer. An arrow pointing out (away from the board), the
-        // name reading up the strip, and a cross at the foot to hide it.
-        let on = hover == Some(Hit::Toggle);
-        let fill = if on { th.last_to } else { th.light_square };
-        cv.rect(2.0, 2.0, w - 4.0, LEN - 4.0, fill);
+        // A thin strip, and all of it is the button that opens it. An arrow pointing out,
+        // the name reading up the strip (or dots), and a cross at the foot to hide it.
         let cx = w / 2.0;
-        let out = if left { -1.0 } else { 1.0 };
-        chevron(cv, cx + out * 1.5, 44.0, out, 5.5, 3.0, th.title);
         let len = txt.width("b11", label);
-        txt.draw_up(cv, "b11", label, cx, LEN / 2.0 + len / 2.0, th.title);
-        let hot = hover == Some(Hit::Hide);
-        let (hx, hy) = (hide.0 + hide.2 / 2.0, hide.1 + hide.2 / 2.0);
+        let faint = |c: Color| Color { a: 0.7, ..c };
+        let (ink, foot) = match st {
+            RailStyle::Pale => {
+                cv.clear(band0);
+                let fill = if on { th.last_to } else { th.light_square };
+                cv.rect(2.0, 2.0, w - 4.0, LEN - 4.0, fill);
+                (th.title, th.muted)
+            }
+            RailStyle::Spine => {
+                cv.vgrad(0.0, 0.0, w, LEN, band0, band1);
+                if on {
+                    cv.rect(0.0, 0.0, w, LEN, Color::rgba8(255, 255, 255, 38));
+                }
+                // a gold edge on the side that faces the board
+                let ex = if left { w - 3.0 } else { 0.0 };
+                cv.rect(ex, 0.0, 3.0, LEN, th.accent);
+                (on_band, faint(on_band))
+            }
+            RailStyle::Tab => {
+                cv.clear(band0);
+                cv.rect(1.5, 1.5, w - 3.0, LEN - 3.0, th.background);
+                let tab = if on { th.accent } else { band0 };
+                cv.rrect(3.0, 6.0, w - 6.0, 92.0, 6.0, tab);
+                let tab_ink = if on { band0 } else { on_band };
+                chevron(cv, cx + out * 1.5, 52.0, out, 5.5, 3.0, tab_ink);
+                txt.draw_up(cv, "b11", label, cx, 122.0 + len, th.title);
+                (th.title, th.muted)
+            }
+            RailStyle::Dots => {
+                cv.vgrad(
+                    0.0,
+                    0.0,
+                    w,
+                    LEN,
+                    band1,
+                    band1.mix(Color::rgba8(0, 0, 0, 255), 0.7),
+                );
+                if on {
+                    cv.rect(0.0, 0.0, w, LEN, Color::rgba8(255, 255, 255, 30));
+                }
+                // one filled dot and two rings: three things to open
+                for (i, y) in [44.0f32, 62.0, 80.0].into_iter().enumerate() {
+                    if i == 0 {
+                        cv.round(cx, y, 4.5, 0.0, th.accent);
+                    } else {
+                        cv.round(cx, y, 4.5, 2.8, faint(on_band));
+                    }
+                }
+                (on_band, faint(on_band))
+            }
+        };
+        match st {
+            RailStyle::Tab | RailStyle::Dots => {}
+            _ => {
+                chevron(cv, cx + out * 1.5, 44.0, out, 5.5, 3.0, ink);
+                txt.draw_up(cv, "b11", label, cx, LEN / 2.0 + len / 2.0, ink);
+            }
+        }
         if hot {
             cv.round(hx, hy, hide.2 / 2.0, 0.0, th.error);
         }
@@ -297,23 +392,43 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
             hy,
             4.0,
             2.0,
-            if hot { th.light_square } else { th.muted },
+            if hot { th.light_square } else { foot },
         );
         return;
     }
+    cv.clear(band0);
     cv.rect(2.0, 2.0, w - 4.0, LEN - 4.0, th.background);
     // header: the name, an arrow that folds the panel (pointing at the board) and a cross to hide it
-    cv.rect(0.0, 0.0, w, HEAD, th.board_border);
-    txt.draw(cv, "b18", title, 14.0, 24.0, th.light_square);
     let towards_board = if left { 1.0 } else { -1.0 };
-    header_button(
-        cv,
-        th,
-        toggle,
-        Some(towards_board),
-        hover == Some(Hit::Toggle),
-    );
-    header_button(cv, th, hide, None, hover == Some(Hit::Hide));
+    let (edge, ink, hover_ink) = match st {
+        RailStyle::Tab => {
+            cv.rect(0.0, 0.0, w, HEAD, th.background);
+            cv.rect(0.0, HEAD - 2.0, w, 2.0, band0);
+            cv.rect(0.0, 0.0, w, 2.0, band0);
+            txt.draw(cv, "b18", title, 14.0, 24.0, th.title);
+            (band0, band0, band0)
+        }
+        RailStyle::Pale => {
+            cv.rect(0.0, 0.0, w, HEAD, band0);
+            txt.draw(cv, "b18", title, 14.0, 24.0, on_band);
+            (on_band, on_band, band0)
+        }
+        RailStyle::Spine => {
+            cv.vgrad(0.0, 0.0, w, HEAD, band0, band1);
+            txt.draw(cv, "b18", title, 14.0, 23.0, on_band);
+            cv.rect(14.0, HEAD - 5.0, 34.0, 3.0, th.accent); // a gold underline
+            (on_band, on_band, band0)
+        }
+        RailStyle::Dots => {
+            cv.vgrad(0.0, 0.0, w, HEAD, band1, band0);
+            cv.round(22.0, 17.0, 4.5, 0.0, th.accent);
+            txt.draw(cv, "b18", title, 36.0, 24.0, on_band);
+            (on_band, on_band, band0)
+        }
+    };
+    let colors = (edge, ink, hover_ink);
+    header_button(cv, th, toggle, Some(towards_board), on, colors);
+    header_button(cv, th, hide, None, hot, colors);
     let top = HEAD;
     match p {
         Panel::Keys => {
@@ -483,9 +598,112 @@ mod tests {
         let r = Rails {
             keys: Mode::Open,
             look: Mode::Hidden,
+            style: RailStyle::Dots,
         };
         assert_eq!(Rails::from_text(&r.to_text()), r);
         let odd = Rails::from_text("keys = sideways\nlook = open\nnonsense\n");
         assert_eq!((odd.keys, odd.look), (Mode::Rail, Mode::Open));
+    }
+
+    /// Draws the rail styles side by side to /tmp/rail-styles.png, to pick from.
+    /// Run by hand: cargo test draw_the_rail_style_sheet -- --ignored
+    #[test]
+    #[ignore]
+    fn draw_the_rail_style_sheet() {
+        use crate::canvas::Color;
+        use crate::pack::{load_pack, pack_index};
+        use crate::text::Txt;
+        let (th, pieces) = load_pack(pack_index("blue-gold").unwrap());
+        let txt = Txt::load();
+        let names = vec![
+            "Blue and Gold".to_string(),
+            "No Crosses".into(),
+            "Wood".into(),
+        ];
+        let scale = 2.0f32;
+        let render = |style: RailStyle, p: Panel, mode: Mode, hover: Option<Hit>| {
+            let mut rails = Rails::new();
+            rails.style = style;
+            match p {
+                Panel::Keys => rails.keys = mode,
+                Panel::Look => rails.look = mode,
+            }
+            let (w, h) = (
+                (Rails::width_of(p, mode) * scale) as usize,
+                (LEN * scale) as usize,
+            );
+            let mut px = vec![0u32; w * h];
+            let view = View {
+                th: &th,
+                pieces: &pieces,
+                tile: 128.0,
+                txt: &txt,
+                kb_file: None,
+                kb_rank: None,
+                thinking_dots: 1,
+                show_pack_name: false,
+                rails: &rails,
+                pack: 0,
+                pack_names: &names,
+                slide: None,
+            };
+            draw_panel(&mut Canvas::new(&mut px, w, h, scale), &view, p, hover);
+            (px, w, h)
+        };
+        let (col_w, gap) = (310.0f32, 26.0f32);
+        let (sw, sh) = (
+            ((col_w + gap) * 4.0 + gap) as usize * 2,
+            (LEN + 70.0) as usize * 2,
+        );
+        let mut sheet = vec![0x002C2C30u32; sw * sh];
+        let blit = |sheet: &mut Vec<u32>, src: &(Vec<u32>, usize, usize), x: f32, y: f32| {
+            let (ox, oy) = ((x * scale) as usize, (y * scale) as usize);
+            for row in 0..src.2 {
+                let d = (oy + row) * sw + ox;
+                sheet[d..d + src.1].copy_from_slice(&src.0[row * src.1..(row + 1) * src.1]);
+            }
+        };
+        let labels = ["1  Pale", "2  Spine", "3  Tab", "4  Dots"];
+        for (i, style) in STYLES.into_iter().enumerate() {
+            let x0 = gap + i as f32 * (col_w + gap);
+            blit(
+                &mut sheet,
+                &render(style, Panel::Keys, Mode::Rail, None),
+                x0,
+                56.0,
+            );
+            blit(
+                &mut sheet,
+                &render(style, Panel::Look, Mode::Rail, Some(Hit::Toggle)),
+                x0 + 34.0,
+                56.0,
+            );
+            blit(
+                &mut sheet,
+                &render(style, Panel::Keys, Mode::Open, Some(Hit::Toggle)),
+                x0 + 74.0,
+                56.0,
+            );
+            let mut cv = Canvas::new(&mut sheet, sw, sh, scale);
+            txt.draw(
+                &mut cv,
+                "b18",
+                labels[i],
+                x0,
+                36.0,
+                Color::rgba8(240, 240, 240, 255),
+            );
+        }
+        let mut cv = Canvas::new(&mut sheet, sw, sh, scale);
+        txt.draw(
+            &mut cv,
+            "r14",
+            "thin rail / thin rail with the pointer on it / open panel",
+            gap,
+            LEN + 64.0,
+            Color::rgba8(160, 160, 170, 255),
+        );
+        cv.save_png(std::path::Path::new("/tmp/rail-styles.png"), None)
+            .unwrap();
     }
 }
