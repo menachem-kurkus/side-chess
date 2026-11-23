@@ -306,6 +306,68 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// An arrow from (x0, y0) to its tip at (x1, y1), in points: a shaft `t` thick with
+    /// a round start and a triangular head of length `head`. Drawn in a single pass so
+    /// a see-through colour is blended once (no darker joins).
+    pub fn arrow(&mut self, from: (f32, f32), to: (f32, f32), t: f32, head: f32, c: Color) {
+        let (x0, y0, x1, y1) = (from.0, from.1, to.0, to.1);
+        let s = self.scale;
+        let (x0, y0, x1, y1, t, head) = (x0 * s, y0 * s, x1 * s, y1 * s, t * s, head * s);
+        let len = (x1 - x0).hypot(y1 - y0);
+        if len < 1.0 {
+            return;
+        }
+        let (dx, dy) = ((x1 - x0) / len, (y1 - y0) / len);
+        let head = head.min(len);
+        let (bx, by) = (x1 - dx * head, y1 - dy * head); // where the head starts
+        let hw = head * 0.6; // half the head's width
+        let (nx, ny) = (-dy, dx);
+        let (ax, ay, cx, cy) = (bx + nx * hw, by + ny * hw, bx - nx * hw, by - ny * hw);
+        let pad = hw.max(t) + 2.0;
+        let (lo_x, hi_x) = (x0.min(x1) - pad, x0.max(x1) + pad);
+        let (lo_y, hi_y) = (y0.min(y1) - pad, y0.max(y1) + pad);
+        let (px0, px1) = (
+            lo_x.floor().max(0.0) as usize,
+            (hi_x.ceil() as usize).min(self.w),
+        );
+        let (py0, py1) = (
+            lo_y.floor().max(0.0) as usize,
+            (hi_y.ceil() as usize).min(self.h),
+        );
+        // signed distance (positive inside) from the edge p->q of the head, which is wound
+        // so the inside is on the left
+        let edge = |px: f32, py: f32, (qx, qy): (f32, f32), (rx, ry): (f32, f32)| {
+            let (ex, ey) = (rx - qx, ry - qy);
+            ((px - qx) * -ey + (py - qy) * ex) / ex.hypot(ey)
+        };
+        let side = if edge(bx, by, (ax, ay), (x1, y1)) > 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        for y in py0..py1 {
+            for x in px0..px1 {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                // the shaft: distance to the segment start..head base
+                let (vx, vy) = (px - x0, py - y0);
+                let along = (vx * dx + vy * dy).clamp(0.0, (len - head).max(0.0));
+                let d = (vx - dx * along).hypot(vy - dy * along);
+                let shaft = (t / 2.0 - d + 0.5).clamp(0.0, 1.0);
+                // the head: inside all three edges
+                // inside all three edges: the smallest signed distance is positive
+                let m = side * edge(px, py, (ax, ay), (x1, y1));
+                let m = m
+                    .min(side * edge(px, py, (x1, y1), (cx, cy)))
+                    .min(side * edge(px, py, (cx, cy), (ax, ay)));
+                let cover = shaft.max((m + 0.5).clamp(0.0, 1.0));
+                if cover > 0.0 {
+                    let i = y * self.w + x;
+                    self.px[i] = blend(self.px[i], [c.r, c.g, c.b], c.a * cover);
+                }
+            }
+        }
+    }
+
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: Color) {
         if c.a <= 0.0 {
             return;
@@ -465,5 +527,34 @@ impl<'a> Canvas<'a> {
         enc.write_header()
             .and_then(|mut w| w.write_image_data(&data))
             .map_err(std::io::Error::other)
+    }
+}
+
+#[cfg(test)]
+mod arrow_tests {
+    use super::*;
+
+    #[test]
+    fn an_arrow_covers_its_line_and_head_and_nothing_far_away() {
+        let (w, h) = (100usize, 100usize);
+        let mut px = vec![0u32; w * h];
+        let mut cv = Canvas::new(&mut px, w, h, 1.0);
+        cv.arrow(
+            (10.0, 50.0),
+            (90.0, 50.0),
+            6.0,
+            20.0,
+            Color::rgba8(255, 255, 255, 255),
+        );
+        let at = |x: usize, y: usize| px[y * w + x] & 255;
+        assert_eq!(at(40, 50), 255, "the shaft");
+        assert_eq!(
+            at(40, 53),
+            0,
+            "outside the shaft: 3 pt half-width, so 3 pt away is the edge"
+        );
+        assert!(at(75, 58) > 0, "the head is wider than the shaft");
+        assert_eq!(at(75, 70), 0, "beyond the head");
+        assert_eq!(at(95, 50), 0, "past the tip");
     }
 }

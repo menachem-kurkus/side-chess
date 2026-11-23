@@ -31,6 +31,7 @@ pub struct View<'a> {
     pub piece_names: &'a [String], // the piece sets in the Pieces list (after "Same as colours")
     pub pieces_row: usize,         // the row of the Pieces list in use (0 follows the colours)
     pub slide: Option<f32>,        // 0..1 while the last move's piece is sliding into place
+    pub arrows: bool,              // X: arrows from every attacker to what it attacks
     pub replay: Option<&'a crate::replay::State>, // a saved game's list or a game being replayed
 }
 
@@ -325,6 +326,11 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         }
     }
 
+    // Threat arrows: from each attacking piece to each enemy piece it attacks
+    if v.arrows {
+        draw_threats(cv, g, v, flip);
+    }
+
     // Game over: banner across the board
     if let Some(msg) = game_over(&g.pos, g.player).filter(|_| run.is_none()) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
@@ -390,6 +396,44 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             W - BX - txt.width("r14", &th.name),
             fy,
             th.muted,
+        );
+    }
+}
+
+/// One arrow per attack: white's and black's in the pack's own colours, and a stronger,
+/// thicker one where the target is undefended or worth more than the attacker.
+fn draw_threats(cv: &mut Canvas<'_>, g: &Game, v: &View, flip: bool) {
+    let th = v.th;
+    for t in crate::threats::threats(&g.pos) {
+        let side = if t.by == Side::White {
+            th.status_your_move
+        } else {
+            th.status_over
+        };
+        let (c, w) = if t.strong {
+            (
+                Color {
+                    a: 0.92,
+                    ..side.mix(th.error, 0.45)
+                },
+                9.0,
+            )
+        } else {
+            (Color { a: 0.55, ..side }, 6.0)
+        };
+        let (fx, fy) = square_xy(t.from, flip);
+        let (tx, ty) = square_xy(t.to, flip);
+        let half = SQ / 2.0;
+        // start a little out from the attacker's centre and stop at the target's
+        let (dx, dy) = (tx - fx, ty - fy);
+        let n = dx.hypot(dy).max(1.0);
+        let (ux, uy) = (dx / n, dy / n);
+        cv.arrow(
+            (fx + half + ux * 14.0, fy + half + uy * 14.0),
+            (tx + half - ux * 8.0, ty + half - uy * 8.0),
+            w,
+            w * 2.4,
+            c,
         );
     }
 }
@@ -519,6 +563,7 @@ mod tests {
                 pieces_row: 0,
                 slide: None,
                 replay: None,
+                arrows: false,
             };
             let mut cv = Canvas::new(&mut px, w, h, 2.0);
             frame(&mut cv, &g, &v);

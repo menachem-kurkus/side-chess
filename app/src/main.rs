@@ -22,6 +22,7 @@ mod rails;
 mod replay;
 mod save;
 mod text;
+mod threats;
 
 use canvas::{Canvas, Img};
 use draw::{promotion_at, square_at, View, H, SQ, W};
@@ -84,6 +85,7 @@ struct App {
     dirty: bool,
     shot: bool,
     replay: replay::State,
+    arrows: bool, // X: threat arrows are on
     rails: Rails,
     rail_wins: Vec<RailWin>,
     preview: Option<usize>, // a look the pointer is on in the Look list, shown until it leaves
@@ -138,6 +140,7 @@ impl App {
             dirty: true,
             shot: false,
             replay: replay::State::default(),
+            arrows: false,
             rails: Rails::load(),
             rail_wins: vec![],
             native_seen: None,
@@ -358,6 +361,7 @@ impl App {
             piece_names: &self.piece_names,
             pieces_row: self.pieces_row(),
             slide: None,
+            arrows: false,
             replay: None,
         };
         rw.presenter.frame(w, h, scale, screen, |px| {
@@ -486,6 +490,8 @@ impl App {
                         'p' => self.shot = true,
                         // R: look at a saved game
                         'r' => self.replay.open_list(),
+                        // X: arrows from every piece to what it attacks
+                        'x' => self.arrows = !self.arrows,
                         // K and L open, close or bring back the keys and look rails
                         'k' => {
                             self.rails.press_key(Panel::Keys);
@@ -520,6 +526,9 @@ impl App {
             if quit && matches!(s.to_lowercase().as_str(), "q" | "w") {
                 el.exit();
             }
+        }
+        if matches!(key, Key::Character(s) if s.eq_ignore_ascii_case("x")) && !quit {
+            self.arrows = !self.arrows;
         }
         if let Some(run) = &mut self.replay.run {
             match key {
@@ -603,6 +612,7 @@ impl App {
             piece_names: &self.piece_names,
             pieces_row: self.pieces_row(),
             slide,
+            arrows: self.arrows,
             replay: self.replay.active().then_some(&self.replay),
         };
         let Some(screen) = &self.screen else {
