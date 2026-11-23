@@ -99,18 +99,12 @@ pub fn apply(th: &mut Theme) {
     th.banner_title = col(n.text, 255);
     th.banner_result = col(n.accent, 255);
     // the board: two tints of the accent, one light and one mid, readable under black and white pieces
-    let (light, dark_sq, border) = if n.dark {
-        (
-            mix(n.accent, white, 0.30),
-            mix(n.accent, white, 0.84),
-            mix(n.accent, white, 0.85),
-        )
+    // The frame and header bands are a neutral grey, as in a Mac's own apps; the accent is the highlight.
+    let border = mix(n.text, n.background, if n.dark { 0.22 } else { 0.7 });
+    let (light, dark_sq) = if n.dark {
+        (mix(n.accent, white, 0.30), mix(n.accent, white, 0.84))
     } else {
-        (
-            mix(n.accent, white, 0.13),
-            mix(n.accent, white, 0.55),
-            mix(n.accent, black, 0.72),
-        )
+        (mix(n.accent, white, 0.13), mix(n.accent, white, 0.55))
     };
     th.light_square = col(light, 255);
     th.dark_square = col(dark_sq, 255);

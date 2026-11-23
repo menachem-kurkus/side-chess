@@ -146,15 +146,19 @@ impl Rails {
                 let w = Rails::width_of(p, Mode::Open);
                 // the arrow that folds the panel is the one nearer the board, the cross the one further
                 let (near, far) = if on_left(p) {
-                    (w - BTN - 6.0, w - 2.0 * BTN - 10.0)
+                    (w - BTN - 8.0, w - 2.0 * BTN - 16.0)
                 } else {
-                    (w - 2.0 * BTN - 10.0, w - BTN - 6.0)
+                    (w - 2.0 * BTN - 16.0, w - BTN - 8.0)
                 };
                 ((near, 4.0, BTN), (far, 4.0, BTN))
             }
             _ => (
                 (0.0, 0.0, RAIL_W),
-                ((RAIL_W - CROSS_BOX) / 2.0, LEN - CROSS_BOX - 8.0, CROSS_BOX),
+                (
+                    (RAIL_W - CROSS_BOX) / 2.0,
+                    LEN - CROSS_BOX - 14.0,
+                    CROSS_BOX,
+                ),
             ),
         }
     }
@@ -439,7 +443,7 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
             }
         }
         Panel::Look => {
-            txt.draw(cv, "r14", "In use", 14.0, top + 28.0, th.muted);
+            txt.draw(cv, "r14", "Looks", 14.0, top + 28.0, th.muted);
             for (i, name) in v.pack_names.iter().enumerate() {
                 let y = top + 58.0 + i as f32 * 30.0;
                 if i == v.pack {
@@ -457,7 +461,7 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
                 th.light_square,
                 th.dark_square,
                 th.accent,
-                th.title,
+                th.board_border,
                 th.text,
             ];
             for (i, c) in swatches.iter().enumerate() {

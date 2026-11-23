@@ -12,7 +12,7 @@ pub const SQ: f32 = 68.0; // one square
 pub const BX: f32 = 28.0; // board left
 pub const BY: f32 = 96.0; // board top
 pub const W: f32 = BX * 2.0 + SQ * 8.0;
-pub const H: f32 = BY + SQ * 8.0 + 76.0;
+pub const H: f32 = BY + SQ * 8.0 + 52.0;
 const HEADER_H: f32 = 78.0; // the header band across the top
 
 /// Everything a frame needs to know beyond the game itself.
@@ -255,7 +255,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     }
 
     // Footer: the last few moves, any note about the AI move, the pack name after T
-    let fy = BY + SQ * 8.0 + 36.0;
+    let fy = BY + SQ * 8.0 + 34.0;
     let moves = if g.sans.is_empty() {
         "No moves yet.".to_string()
     } else {

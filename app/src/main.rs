@@ -81,8 +81,9 @@ struct App {
     shot: bool,
     rails: Rails,
     rail_wins: Vec<RailWin>,
-    prev_moves: usize,                   // how many moves the last frame had
-    slide_from: Option<Instant>,         // when the last move's slide began
+    rails_away: bool,  // the rails are out of sight because the board is minimised
+    prev_moves: usize, // how many moves the last frame had
+    slide_from: Option<Instant>, // when the last move's slide began
     native_seen: Option<native::Native>, // the system colours the native look was last built from
     pack_names: Vec<String>,
 }
@@ -130,6 +131,7 @@ impl App {
             rails: Rails::load(),
             rail_wins: vec![],
             native_seen: None,
+            rails_away: false,
             prev_moves: 0,
             slide_from: None,
             pack_names: (0..PACKS.len())
@@ -555,6 +557,18 @@ impl ApplicationHandler for App {
         check_opponent_move(&mut self.g);
         if (self.g.sans.len(), self.g.note.clone()) != before {
             self.dirty = true;
+        }
+        // The rails go away with the board when it is minimised, and come back with it
+        let minimised = self
+            .window
+            .as_ref()
+            .and_then(|w| w.is_minimized())
+            .unwrap_or(false);
+        if minimised != self.rails_away {
+            self.rails_away = minimised;
+            for r in &self.rail_wins {
+                r.window.set_visible(!minimised);
+            }
         }
         let shot_req = live_dir().join("shot");
         if shot_req.exists() {
