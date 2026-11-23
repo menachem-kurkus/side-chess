@@ -3,6 +3,7 @@
 use crate::canvas::{Canvas, Img};
 use crate::game::{game_over, move_list, shown_to, sq, Game};
 use crate::pack::Theme;
+use crate::rails::Rails;
 use crate::text::Txt;
 use shakmaty::{Color as Side, Position, Role, Square};
 
@@ -23,6 +24,9 @@ pub struct View<'a> {
     pub kb_rank: Option<u32>, // half-typed square: the number so far
     pub thinking_dots: usize, // 1..=3, animates the opponent's thinking status
     pub show_pack_name: bool, // for two seconds after T
+    pub rails: &'a Rails,     // the thin side panels
+    pub pack: usize,          // which look is in use
+    pub pack_names: &'a [String],
 }
 
 /// Where a square is drawn. The player's own pieces are at the bottom, so the
@@ -51,7 +55,7 @@ pub fn square_at(x: f32, y: f32, flip: bool) -> Option<Square> {
 }
 
 /// Pieces image: King Queen Rook Bishop Knight Pawn across; white row, then black row.
-fn piece_tile(role: Role, side: Side) -> (f32, f32) {
+pub fn piece_tile(role: Role, side: Side) -> (f32, f32) {
     let col = match role {
         Role::King => 0.0,
         Role::Queen => 1.0,

@@ -41,6 +41,40 @@ impl Txt {
             .sum()
     }
 
+    /// Draws `s` reading upwards (a quarter turn anticlockwise), centred on the
+    /// vertical line `cx`, with its first letter at `bottom` and the rest above it.
+    pub fn draw_up(
+        &self,
+        cv: &mut Canvas<'_>,
+        style: &str,
+        s: &str,
+        cx: f32,
+        bottom: f32,
+        col: Color,
+    ) {
+        let Some(&(ry, h, _)) = self.rows.get(style) else {
+            return;
+        };
+        let mut pen = bottom;
+        for b in s.bytes() {
+            let Some(&(gx, w, adv)) = self.chars.get(&(style.to_string(), b)) else {
+                continue;
+            };
+            cv.image_up(
+                &self.img,
+                (gx, ry, w, h),
+                (
+                    (cx - h / 4.0).round(),
+                    (pen - w / 2.0).round(),
+                    h / 2.0,
+                    w / 2.0,
+                ),
+                col,
+            );
+            pen -= adv / 2.0;
+        }
+    }
+
     /// Draws `s` with its baseline at `baseline` (points).
     pub fn draw(
         &self,

@@ -231,6 +231,15 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// A straight line of thickness `t` with round ends, from (x0, y0) to (x1, y1).
+    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, t: f32, c: Color) {
+        let n = ((x1 - x0).hypot(y1 - y0) * 2.0).ceil().max(1.0) as i32;
+        for i in 0..=n {
+            let f = i as f32 / n as f32;
+            self.round(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, t / 2.0, 0.0, c);
+        }
+    }
+
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: Color) {
         if c.a <= 0.0 {
             return;
@@ -254,6 +263,43 @@ impl<'a> Canvas<'a> {
         self.rect(x, y + h - t, w, t, c);
         self.rect(x, y + t, t, h - 2.0 * t, c);
         self.rect(x + w - t, y + t, t, h - 2.0 * t, c);
+    }
+
+    /// Like `image`, but turned a quarter turn anticlockwise, so text reads from the
+    /// bottom up. `dst` is the turned rectangle in points (its width is the source's
+    /// height, its height the source's width).
+    pub fn image_up(
+        &mut self,
+        img: &Img,
+        src: (f32, f32, f32, f32),
+        dst: (f32, f32, f32, f32),
+        tint: Color,
+    ) {
+        let (sx, sy, sw, sh) = src;
+        let (dx, dy, dw, dh) = dst;
+        let (x0, y0, x1, y1) = self.bounds(dx, dy, dw, dh);
+        let s = self.scale;
+        for row in y0..y1 {
+            for col in x0..x1 {
+                // average four points inside the canvas pixel so the edges stay smooth
+                let mut acc = [0.0f32; 4];
+                for (ox, oy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                    let u = (col as f32 + ox - dx * s) / (dw * s); // across the turned box
+                    let v = (row as f32 + oy - dy * s) / (dh * s); // down it
+                    if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+                        continue;
+                    }
+                    // the source's x runs up the box, its y runs across it
+                    let q = img.sample(sx + (1.0 - v) * sw - 0.5, sy + u * sh - 0.5);
+                    acc[3] += q[3];
+                }
+                let a = acc[3] / 4.0 * tint.a;
+                if a > 0.0 {
+                    let i = row * self.w + col;
+                    self.px[i] = blend(self.px[i], [tint.r, tint.g, tint.b], a);
+                }
+            }
+        }
     }
 
     /// Draws part of an image (`src` in image pixels: x, y, w, h) into a

@@ -61,7 +61,7 @@ Codex finds the skill on its own when you open it in this repository. To use it 
 
 - Click a piece, then a square. Pawns promote to a queen.
 - Or type a square's letter and number, in either order (half a square tints its row or column), then the square to move to, then Enter. Typing another of your pieces switches to it; illegal squares are ignored. Esc clears.
-- Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, S swaps sides (you play black, the assistant plays white) and starts a new game, but only before the first move or after a game ends; mid-game the window shows a message asking you to press N first, T switches the look (pack), P saves a screenshot.
+- Ctrl+Q (Cmd+Q on a Mac) quits, U takes back your last move, N starts a new game, S swaps sides (you play black, the assistant plays white) and starts a new game, T switches the look (pack), P saves a screenshot, K and L open, close or bring back the two thin side windows beside the board: Keys on the left lists these keys, Look on the right shows the pack in use. Click a rail to open it, the arrow button folds it back to a rail, the cross button hides it. They follow the board when you move it; moving or opening a rail never moves the board.
 - The board shows the last move in gold, a king in check in red, and a banner for checkmate, stalemate or a draw. Pick a piece and faded dots show where it can go (a ring on a piece it can take). Castling (click the king, then g or c) and en passant work.
 
 ## How it works

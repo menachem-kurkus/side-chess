@@ -17,6 +17,7 @@ mod game;
 mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
 mod present;
+mod rails;
 mod text;
 
 use canvas::{Canvas, Img};
@@ -26,6 +27,7 @@ use game::{
 };
 use pack::{load_pack, load_pack_for, saved_pack, Theme, PACKS};
 use present::{Presenter, Screen};
+use rails::{Hit, Mode, Panel, Rails, LEN, TOP};
 use shakmaty::{fen::Fen, Chess, Color as Side, Position};
 use std::{
     fs,
@@ -35,7 +37,7 @@ use std::{
 use text::Txt;
 use winit::{
     application::ApplicationHandler,
-    dpi::LogicalSize,
+    dpi::{LogicalSize, PhysicalPosition},
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState, NamedKey},
@@ -44,6 +46,15 @@ use winit::{
 
 /// How often the app looks for the opponent's move and a screenshot request.
 const POLL: Duration = Duration::from_millis(250);
+
+/// One of the thin side windows (see rails.rs): its own window, docked beside the board.
+struct RailWin {
+    panel: Panel,
+    window: Rc<Window>,
+    presenter: Presenter,
+    mouse: (f32, f32),  // the pointer in this window
+    hover: Option<Hit>, // the button under it
+}
 
 struct App {
     window: Option<Rc<Window>>,
@@ -64,6 +75,9 @@ struct App {
     dots: usize,
     dirty: bool,
     shot: bool,
+    rails: Rails,
+    rail_wins: Vec<RailWin>,
+    pack_names: Vec<String>,
 }
 
 impl App {
@@ -106,7 +120,133 @@ impl App {
             dots: 1,
             dirty: true,
             shot: false,
+            rails: Rails::load(),
+            rail_wins: vec![],
+            pack_names: (0..PACKS.len())
+                .map(|i| {
+                    Theme::load(i)
+                        .map(|t| t.name)
+                        .unwrap_or_else(|_| PACKS[i].0.to_string())
+                })
+                .collect(),
         }
+    }
+
+    /// A rail was opened, closed or hidden: save it and make the windows match.
+    fn rails_changed(&mut self, el: &ActiveEventLoop) {
+        self.rails.save();
+        self.sync_rails(el);
+        self.dirty = true;
+    }
+
+    /// Open a window for each rail on show, close the hidden ones, size the rest and
+    /// put them all in a row beside the board.
+    fn sync_rails(&mut self, el: &ActiveEventLoop) {
+        if self.window.is_none() {
+            return;
+        }
+        for p in [Panel::Keys, Panel::Look] {
+            let mode = self.rails.mode(p);
+            let have = self.rail_wins.iter().position(|r| r.panel == p);
+            let w = Rails::width_of(p, mode) as f64;
+            match (mode, have) {
+                (Mode::Hidden, Some(i)) => {
+                    self.rail_wins.remove(i);
+                }
+                (Mode::Hidden, None) => {}
+                (_, Some(i)) => {
+                    let _ = self.rail_wins[i]
+                        .window
+                        .request_inner_size(LogicalSize::new(w, LEN as f64));
+                }
+                (_, None) => {
+                    let attrs = Window::default_attributes()
+                        .with_title("Side Chess")
+                        .with_decorations(false)
+                        .with_resizable(false)
+                        .with_active(false)
+                        .with_inner_size(LogicalSize::new(w, LEN as f64));
+                    // Not a child of the board window: macOS moves a whole group of windows
+                    // together to keep a child on screen, and a rail must never move the board.
+                    // The rails follow the board instead (see place_rails).
+                    if let Ok(window) = el.create_window(attrs) {
+                        let window = Rc::new(window);
+                        let presenter = Presenter::new(&window);
+                        window.request_redraw();
+                        self.rail_wins.push(RailWin {
+                            panel: p,
+                            window,
+                            presenter,
+                            mouse: (0.0, 0.0),
+                            hover: None,
+                        });
+                    }
+                }
+            }
+        }
+        for r in &mut self.rail_wins {
+            r.hover = None;
+        }
+        self.place_rails();
+    }
+
+    /// Line the rail windows up beside the board window.
+    fn place_rails(&self) {
+        let Some(main) = &self.window else {
+            return;
+        };
+        let Ok(at) = main.inner_position() else {
+            return;
+        };
+        let s = main.scale_factor();
+        for (p, x, _) in self.rails.layout() {
+            if let Some(r) = self.rail_wins.iter().find(|r| r.panel == p) {
+                r.window.set_outer_position(PhysicalPosition::new(
+                    at.x + (x as f64 * s).round() as i32,
+                    at.y + (TOP as f64 * s).round() as i32,
+                ));
+            }
+        }
+    }
+
+    fn request_redraws(&self) {
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+        for r in &self.rail_wins {
+            r.window.request_redraw();
+        }
+    }
+
+    /// Draw one rail window.
+    fn redraw_rail(&self, i: usize) {
+        let Some(screen) = &self.screen else {
+            return; // the board window has not worked out the screen's colours yet
+        };
+        let rw = &self.rail_wins[i];
+        let size = rw.window.inner_size();
+        let (w, h) = (size.width as usize, size.height as usize);
+        if w == 0 || h == 0 {
+            return;
+        }
+        let scale = rw.window.scale_factor();
+        let view = View {
+            th: &self.th,
+            pieces: self.sized.as_ref().map_or(&self.pieces, |s| &s.2),
+            tile: self.sized.as_ref().map_or(128.0, |s| s.1 as f32),
+            txt: &self.txt,
+            kb_file: None,
+            kb_rank: None,
+            thinking_dots: self.dots,
+            show_pack_name: false,
+            rails: &self.rails,
+            pack: self.pack,
+            pack_names: &self.pack_names,
+        };
+        rw.presenter.frame(w, h, scale, screen, |px| {
+            let mut cv = Canvas::new(px, w, h, scale as f32);
+            rails::draw_panel(&mut cv, &view, rw.panel, rw.hover);
+        });
     }
 
     fn my_turn(&self) -> bool {
@@ -184,6 +324,15 @@ impl App {
                             self.pack_shown_at = Some(Instant::now());
                         }
                         'p' => self.shot = true,
+                        // K and L open, close or bring back the keys and look rails
+                        'k' => {
+                            self.rails.press_key(Panel::Keys);
+                            self.rails_changed(el);
+                        }
+                        'l' => {
+                            self.rails.press_key(Panel::Look);
+                            self.rails_changed(el);
+                        }
                         _ => {}
                     }
                 }
@@ -235,6 +384,9 @@ impl App {
             show_pack_name: self
                 .pack_shown_at
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(2)),
+            rails: &self.rails,
+            pack: self.pack,
+            pack_names: &self.pack_names,
         };
         let Some(screen) = &self.screen else {
             return;
@@ -280,23 +432,56 @@ impl ApplicationHandler for App {
         self.presenter = Some(Presenter::new(&window));
         window.request_redraw();
         self.window = Some(window);
+        self.sync_rails(el);
     }
 
-    fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, ev: WindowEvent) {
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, ev: WindowEvent) {
+        // which rail window this is for, if it is not the board window
+        let rail = self.rail_wins.iter().position(|r| r.window.id() == id);
         match ev {
-            WindowEvent::CloseRequested => el.exit(),
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::CloseRequested if rail.is_none() => el.exit(),
+            WindowEvent::RedrawRequested => match rail {
+                Some(i) => self.redraw_rail(i),
+                None => self.redraw(),
+            },
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
-            WindowEvent::CursorMoved { position, .. } => {
-                let s = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
-                self.mouse = ((position.x / s) as f32, (position.y / s) as f32);
+            WindowEvent::CursorMoved { position, .. } => match rail {
+                Some(i) => {
+                    let r = &mut self.rail_wins[i];
+                    let s = r.window.scale_factor();
+                    r.mouse = ((position.x / s) as f32, (position.y / s) as f32);
+                    let hover = self.rails.hit(r.panel, r.mouse.0, r.mouse.1);
+                    if hover != r.hover {
+                        r.hover = hover;
+                        self.dirty = true;
+                    }
+                }
+                None => {
+                    let s = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
+                    self.mouse = ((position.x / s) as f32, (position.y / s) as f32);
+                }
+            },
+            WindowEvent::CursorLeft { .. } => {
+                if let Some(i) = rail {
+                    if self.rail_wins[i].hover.take().is_some() {
+                        self.dirty = true;
+                    }
+                }
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
             } => {
-                self.click();
+                match rail {
+                    Some(i) => {
+                        let (p, (x, y)) = (self.rail_wins[i].panel, self.rail_wins[i].mouse);
+                        if self.rails.click(p, x, y) {
+                            self.rails_changed(el);
+                        }
+                    }
+                    None => self.click(),
+                }
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -304,8 +489,16 @@ impl ApplicationHandler for App {
             {
                 self.key(&event.logical_key, el);
             }
+            WindowEvent::Resized(_) if rail.is_some() => {
+                self.place_rails(); // a rail changed width: keep it against the board
+                self.dirty = true;
+            }
+            WindowEvent::Moved(_) if rail.is_none() => {
+                self.place_rails(); // the board window moved (maybe onto another screen)
+                self.dirty = true;
+            }
             WindowEvent::Resized(_)
-            | WindowEvent::Moved(_) // maybe onto another screen
+            | WindowEvent::Moved(_)
             | WindowEvent::ScaleFactorChanged { .. }
             | WindowEvent::Focused(_) => {
                 self.dirty = true;
@@ -314,9 +507,7 @@ impl ApplicationHandler for App {
         }
         if self.dirty {
             self.dirty = false;
-            if let Some(w) = &self.window {
-                w.request_redraw();
-            }
+            self.request_redraws();
         }
     }
 
@@ -349,9 +540,7 @@ impl ApplicationHandler for App {
         }
         if self.dirty {
             self.dirty = false;
-            if let Some(w) = &self.window {
-                w.request_redraw();
-            }
+            self.request_redraws();
         }
         el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + POLL));
     }
