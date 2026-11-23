@@ -31,7 +31,7 @@ Thanks for helping. Anyone can open an issue or a pull request.
    - Don't load font files at run time. Text and pieces are baked into images by `app/build.rs`.
    - Redraw only when something changes (see `about_to_wait` in `main.rs`).
 4. **New behaviour comes with a test.** Rules and input live in `game.rs`, looks in `pack.rs`; both have tests at the bottom.
-5. **Keep the board's hints to the selected piece.** The board highlights the selected piece and its legal moves (faded dots, a ring on a capture), the half-typed row or column, the move waiting for Enter, the last move and check. It never suggests which move is best.
+5. **Keep the live board's hints to the selected piece.** During a game the board highlights the selected piece and its legal moves (faded dots, a ring on a capture), the half-typed row or column, the move waiting for Enter, the last move and check. It never suggests which move is best. Two features show more, and only when the player asks: threat arrows (X), and, in a replay of a saved game with Stockfish installed, the engine's move and `?!` / `?` / `??` marks on moves already played.
 6. **Licence.** Side Chess is GPL-3.0-or-later (its chess rules library, shakmaty, is GPL). By sending a pull request you agree your change is shared under the same licence. Don't paste code from projects with incompatible licences.
 7. **Only things you may share.** No keys, tokens or personal data. Images in a pack must be your own or under a licence that allows sharing (say which in the pack's folder).
 
@@ -46,6 +46,13 @@ Thanks for helping. Anyone can open an issue or a pull request.
 | `app/src/present.rs` | Showing frames in the screen's own colours; converting pack colours per screen |
 | `app/src/text.rs` | Text from the baked atlas |
 | `app/src/main.rs` | The window, keys and mouse |
+| `app/src/rails.rs` | The two thin side windows: Keys (K) and Look (L) |
+| `app/src/native.rs` | The Native look: colours read from the operating system |
+| `app/src/save.rs` | Saving finished games as PGN in `~/.side-chess/games/` |
+| `app/src/replay.rs` | The saved-games list and replay (R) |
+| `app/src/engine.rs` | Optional Stockfish move ratings (a separate program, never bundled) |
+| `app/src/threats.rs` | Threat arrows (X) |
+| `app/src/present_other.rs` | Showing frames on Windows and Linux |
 | `app/build.rs` | Bakes pieces and text from the system's fonts at build time |
 | `app/packs/` | Looks ("packs"); see `app/packs/README.md` |
 | `hooks/register.tsx` | The Launch Side Chess button (a Claude Code mod) |

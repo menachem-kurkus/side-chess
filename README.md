@@ -2,7 +2,13 @@
 
 Play chess against your AI assistant in a tiny window on Mac, Windows or Linux while your other sessions work. You play white by default and Claude Code or Codex plays black; press S in the window between games to swap, so you play black and the assistant plays white. S is refused mid-game (the window says so): press N for a new game first.
 
-Linux and Codex support are new in 0.2.2 and not yet tested in a real game; Mac and Windows with Claude Code are tested. Reports are welcome.
+What is tested, and where:
+
+- **Tested:** Mac and Windows with Claude Code.
+- **Not tested yet:** Linux (CI builds and runs the tests there, but nobody has played a real game on a Linux desktop) and Codex (nobody has played a real Codex game).
+- **Hand-tested on a Mac only:** the newer features by Ann: playing black (S), the side panels (K and L), the clickable Look panel, the promotion choice, saved games and replay (R), threat arrows (X) and Stockfish move ratings. Windows and Linux compile and pass the tests, but nobody has run these features there by hand.
+
+Reports are welcome.
 
 - A native Rust window that stays under 100 MB of memory (about 35 MB at its peak on a Retina Mac; about 8 MB private, 23 MB at its peak, on Windows 11) and redraws only when something changes.
 - **Claude Code:** a **Launch Side Chess** button above the prompt (a Claude Code mod) opens the window and tells the session you've begun, and the `side-chess` skill teaches Claude to install the app, watch the game and answer each move.
