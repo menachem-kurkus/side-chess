@@ -353,29 +353,35 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
             y += 48.0;
             txt.draw(cv, "r14", "Pieces", 14.0, y + 14.0, th.muted);
             y += 24.0;
-            // a few pieces on the board's two colours
-            let tiles = [
-                (Role::King, Side::White, true),
-                (Role::Queen, Side::Black, false),
-                (Role::Knight, Side::White, false),
-                (Role::Pawn, Side::Black, true),
+            // every piece of the pack, white then black, on the board's two colours
+            let order = [
+                Role::King,
+                Role::Queen,
+                Role::Rook,
+                Role::Bishop,
+                Role::Knight,
+                Role::Pawn,
             ];
-            for (i, (role, side, dark)) in tiles.iter().enumerate() {
-                let tx = 14.0 + i as f32 * 44.0;
-                let sq = if *dark {
-                    th.dark_square
-                } else {
-                    th.light_square
-                };
-                cv.rect(tx, y, 42.0, 42.0, sq);
-                let (sx, sy) = piece_tile(*role, *side);
-                let k = v.tile / 128.0;
-                cv.image(
-                    v.pieces,
-                    (sx * k, sy * k, v.tile, v.tile),
-                    (tx + 1.0, y + 1.0, 40.0, 40.0),
-                    None,
-                );
+            for (row, side) in [Side::White, Side::Black].into_iter().enumerate() {
+                for (i, role) in order.into_iter().enumerate() {
+                    let tx = 14.0 + i as f32 * 30.0;
+                    let ty = y + row as f32 * 30.0;
+                    let dark = (i + row) % 2 == 0;
+                    let sq = if dark {
+                        th.dark_square
+                    } else {
+                        th.light_square
+                    };
+                    cv.rect(tx, ty, 30.0, 30.0, sq);
+                    let (sx, sy) = piece_tile(role, side);
+                    let k = v.tile / 128.0;
+                    cv.image(
+                        v.pieces,
+                        (sx * k, sy * k, v.tile, v.tile),
+                        (tx + 1.0, ty + 1.0, 28.0, 28.0),
+                        None,
+                    );
+                }
             }
             txt.draw(cv, "r14", "T: next look", 14.0, LEN - 22.0, th.muted);
         }
