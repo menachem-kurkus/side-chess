@@ -30,6 +30,13 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: bash
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-memory.ps1 -Limit 30 2>&1 | tee "$RUNNER_TEMP/memory.txt"
+      - name: Plugin manifest, mod and skill are valid
+        id: plugin
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate . 2>&1 | tee "$RUNNER_TEMP/plugin.txt"
       - name: Summary
         if: ${{ always() }}
         shell: bash
@@ -38,6 +45,7 @@ jobs:
           TESTS: ${{ steps.tests.outcome }}
           BUILD: ${{ steps.build.outcome }}
           MEMORY: ${{ steps.memory.outcome }}
+          PLUGIN: ${{ steps.plugin.outcome }}
         run: |
           result() { case "$1" in success) echo "Passed" ;; failure) echo "**Failed**" ;; skipped|"") echo "Not run" ;; *) echo "$1" ;; esac; }
           peak=$(grep -oE "peaked at [0-9]+ MB" "$RUNNER_TEMP/memory.txt" 2>/dev/null | grep -oE "[0-9]+" | tail -1)
@@ -50,6 +58,7 @@ jobs:
             echo "| Tests | $(result "$TESTS") | \`cargo test --release\` |"
             echo "| Build and install | $(result "$BUILD") | \`app/install.ps1\` |"
             echo "| Memory under 30 MB | $(result "$MEMORY") | ${peak:+peak ${peak} MB of 30 (private working set)} |"
+            echo "| Plugin, mod and skill | $(result "$PLUGIN") | \`claude plugin validate\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   mac:
@@ -113,4 +122,51 @@ jobs:
             echo "| Plugin, mod and skill | $(result "$PLUGIN") | \`claude plugin validate\`${warnings:+, ${warnings} warning(s)} |"
             echo
             echo "Full output for each check is in the job log above."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      # The app ships for Mac and Windows only; on Linux build.rs bakes its
+      # pieces and text from these free fonts instead, so the tests can run.
+      - name: Fonts
+        run: sudo apt-get update -q && sudo apt-get install -y -q fonts-liberation fonts-dejavu-core
+      - name: Formatting
+        id: fmt
+        working-directory: app
+        run: cargo fmt --check
+      - name: Tests
+        id: tests
+        if: ${{ !cancelled() }}
+        working-directory: app
+        run: cargo test --release 2>&1 | tee "$RUNNER_TEMP/tests.txt"
+      - name: Plugin manifest, mod and skill are valid
+        id: plugin
+        if: ${{ !cancelled() }}
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate . 2>&1 | tee "$RUNNER_TEMP/plugin.txt"
+      - name: Summary
+        if: ${{ always() }}
+        env:
+          FMT: ${{ steps.fmt.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          PLUGIN: ${{ steps.plugin.outcome }}
+        run: |
+          result() { case "$1" in success) echo "Passed" ;; failure) echo "**Failed**" ;; skipped|"") echo "Not run" ;; *) echo "$1" ;; esac; }
+          tests=$(grep -o "[0-9]* passed; [0-9]* failed" "$RUNNER_TEMP/tests.txt" 2>/dev/null | tail -1)
+          {
+            echo "## Side Chess checks (Linux)"
+            echo
+            echo "| Check | Result | Detail |"
+            echo "|---|---|---|"
+            echo "| Formatting | $(result "$FMT") | \`cargo fmt --check\` |"
+            echo "| Tests | $(result "$TESTS") | ${tests:-no result} |"
+            echo "| Plugin, mod and skill | $(result "$PLUGIN") | \`claude plugin validate\` |"
+            echo
+            echo "The app isn't installed or memory-checked here: it ships for Mac and Windows."
           } >> "$GITHUB_STEP_SUMMARY"

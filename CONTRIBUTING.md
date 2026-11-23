@@ -5,7 +5,7 @@ Thanks for helping. Anyone can open an issue or a pull request.
 ## The rules
 
 1. **Every change goes in as a pull request.** Nobody pushes to `main` directly; the owner reviews and merges.
-2. **All checks must pass** before a pull request is merged. GitHub runs them on a Mac and on Windows for every push (`.github/workflows/checks.yml`). Run them yourself first:
+2. **All checks must pass** before a pull request is merged. GitHub runs them on a Mac, on Windows and on Linux (tests and the plugin check only) for every push (`.github/workflows/checks.yml`). Run them yourself first:
 
    ```bash
    cd app && cargo fmt --check                                   # formatting
