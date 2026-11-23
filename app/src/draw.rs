@@ -12,7 +12,7 @@ pub const SQ: f32 = 68.0; // one square
 pub const BX: f32 = 28.0; // board left
 pub const BY: f32 = 96.0; // board top
 pub const W: f32 = BX * 2.0 + SQ * 8.0;
-pub const H: f32 = BY + SQ * 8.0 + 52.0;
+pub const H: f32 = BY + SQ * 8.0 + 68.0;
 const HEADER_H: f32 = 78.0; // the header band across the top
 
 /// Everything a frame needs to know beyond the game itself.
@@ -265,9 +265,9 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     };
     txt.draw(cv, "r16", &moves, BX, fy, th.text);
     if !g.note.is_empty() {
-        txt.draw(cv, "r14", &g.note, BX, fy + 26.0, th.error);
+        txt.draw(cv, "r14", &g.note, BX, fy + 24.0, th.error);
     } else if !g.hint.is_empty() {
-        txt.draw(cv, "r14", &g.hint, BX, fy + 26.0, th.error);
+        txt.draw(cv, "r14", &g.hint, BX, fy + 24.0, th.error);
     }
     if v.show_pack_name {
         txt.draw(
