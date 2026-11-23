@@ -40,7 +40,7 @@ pub fn read() -> Option<Native> {
         let space_cls = AnyClass::get(c"NSColorSpace")?;
         let srgb: Option<Retained<AnyObject>> = msg_send![space_cls, sRGBColorSpace];
         let srgb = srgb?;
-        let rgb = |sel_name: &str| -> Option<[u8; 3]> {
+        let rgba = |sel_name: &str| -> Option<([u8; 3], f64)> {
             let color: Option<Retained<AnyObject>> = match sel_name {
                 "window" => msg_send![color_cls, windowBackgroundColor],
                 "label" => msg_send![color_cls, labelColor],
@@ -53,15 +53,18 @@ pub fn read() -> Option<Native> {
             let (mut r, mut g, mut b, mut a) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
             let _: () = msg_send![&*c, getRed: &mut r, green: &mut g, blue: &mut b, alpha: &mut a];
             let q = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-            // a colour with some see-through (text colours are) is shown over the window colour
-            Some([q(r), q(g), q(b)])
+            Some(([q(r), q(g), q(b)], a))
         };
+        let background = rgba("window")?.0;
+        // The text colours are see-through (the quieter the more): show them over the
+        // window colour, which is what the eye sees, so "muted" is a lighter text colour.
+        let over = |(c, a): ([u8; 3], f64)| mix(c, background, a as f32);
         Some(Native {
             dark,
-            background: rgb("window")?,
-            text: rgb("label")?,
-            muted: rgb("secondary")?,
-            accent: rgb("accent")?,
+            background,
+            text: over(rgba("label")?),
+            muted: over(rgba("secondary")?),
+            accent: rgba("accent")?.0,
         })
     }
 }

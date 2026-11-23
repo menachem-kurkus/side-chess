@@ -206,6 +206,12 @@ impl App {
                         .with_resizable(false)
                         .with_active(false)
                         .with_inner_size(LogicalSize::new(w, LEN as f64));
+                    // a rail is part of the board's window group: no taskbar entry of its own
+                    #[cfg(windows)]
+                    let attrs = {
+                        use winit::platform::windows::WindowAttributesExtWindows;
+                        attrs.with_skip_taskbar(true)
+                    };
                     // Not a child of the board window: macOS moves a whole group of windows
                     // together to keep a child on screen, and a rail must never move the board.
                     // The rails follow the board instead (see place_rails).
@@ -227,6 +233,7 @@ impl App {
         for r in &mut self.rail_wins {
             r.hover = None;
         }
+        self.preview_pack(None); // a closed or folded list can't keep a look on show
         self.place_rails();
     }
 
@@ -396,7 +403,8 @@ impl App {
         let scale = window.scale_factor();
         // New screen (or new pack): convert the pack's colours for this screen.
         let screen = presenter.screen();
-        if self.screen.as_ref() != Some(&screen) {
+        let screen_changed = self.screen.as_ref() != Some(&screen);
+        if screen_changed {
             (self.th, self.pieces) = load_pack_for(self.shown_pack(), &screen);
             self.screen = Some(screen);
             self.sized = None;
@@ -455,6 +463,12 @@ impl App {
                 let _ = cv.save_png(&live_dir().join("screen.png"), screen.icc());
             }
         });
+        // the rails wait for the board to work out the screen's colours: draw them now
+        if screen_changed {
+            for r in &self.rail_wins {
+                r.window.request_redraw();
+            }
+        }
         // while a piece is sliding, ask for the next frame straight away
         if slide.is_some() {
             window.request_redraw();

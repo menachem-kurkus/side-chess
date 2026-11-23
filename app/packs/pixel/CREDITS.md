@@ -10,4 +10,4 @@ as listed in its COPYING.md.
   one 768 x 256 `pieces.png` (King Queen Rook Bishop Knight Pawn across, white row then black row).
   The board colours in `pack.txt` are ours.
 
-The AGPL-3.0-or-later licence applies to these drawings. GPL-3.0 (this app) and AGPL-3.0 allow being combined (GPL-3.0 section 13). The source of the drawings is the SVG files linked above.
+The AGPL-3.0-or-later licence applies to these drawings; its text is in LICENSE.txt in this folder. GPL-3.0 (this app) and AGPL-3.0 allow being combined (GPL-3.0 section 13). The source of the drawings is the SVG files linked above.
