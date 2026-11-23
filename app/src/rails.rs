@@ -38,7 +38,7 @@ const GAP: f32 = 6.0; // between a rail window and the board window
 pub const TOP: f32 = BY - 4.0; // level with the board's border, from the board window's top
 pub const LEN: f32 = SQ * 8.0 + 8.0; // as tall as the board and its border
 const HEAD: f32 = 34.0;
-const ROW: f32 = 30.0; // one look in the Look list
+const ROW: f32 = 24.0; // one look in the Look list (a dozen fit)
 const LIST_TOP: f32 = HEAD + 40.0; // where the list of looks starts
 const BTN: f32 = 26.0; // the buttons in an open panel's header
 const CROSS_BOX: f32 = 22.0; // the hide cross's hit box at the foot of a thin rail
@@ -461,7 +461,7 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
         Panel::Look => {
             txt.draw(cv, "r14", "Looks", 14.0, top + 28.0, th.muted);
             for (i, name) in v.pack_names.iter().enumerate() {
-                let y = top + 58.0 + i as f32 * 30.0;
+                let y = LIST_TOP + i as f32 * ROW + 17.0;
                 if hover == Some(Hit::Pick(i)) {
                     // the pointer is on this look: the board shows it too, a click keeps it
                     cv.rect(
@@ -472,19 +472,19 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
                         th.half_typed,
                     );
                     if i == v.pack {
-                        cv.rect(14.0, y - 16.0, 4.0, 22.0, th.accent); // still the chosen one
+                        cv.rect(14.0, y - 14.0, 4.0, 18.0, th.accent); // still the chosen one
                     }
                     txt.draw(cv, "r16", name, 28.0, y, th.title);
                     continue;
                 }
                 if i == v.pack {
-                    cv.rect(14.0, y - 16.0, 4.0, 22.0, th.accent);
+                    cv.rect(14.0, y - 14.0, 4.0, 18.0, th.accent);
                     txt.draw(cv, "r16", name, 28.0, y, th.title);
                 } else {
                     txt.draw(cv, "r14", name, 28.0, y, th.muted);
                 }
             }
-            let mut y = top + 58.0 + v.pack_names.len() as f32 * 30.0 + 14.0;
+            let mut y = LIST_TOP + v.pack_names.len() as f32 * ROW + 14.0;
             txt.draw(cv, "r14", "Colours", 14.0, y + 14.0, th.muted);
             y += 24.0;
             let swatches = [
@@ -500,7 +500,7 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
                 cv.rect(sx - 1.0, y - 1.0, 26.0, 26.0, th.muted);
                 cv.rect(sx, y, 24.0, 24.0, *c);
             }
-            y += 48.0;
+            y += 44.0;
             txt.draw(cv, "r14", "Pieces", 14.0, y + 14.0, th.muted);
             y += 24.0;
             // every piece of the pack, white then black, on the board's two colours
@@ -533,7 +533,6 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
                     );
                 }
             }
-            txt.draw(cv, "r14", "T: next look", 14.0, LEN - 22.0, th.muted);
         }
     }
 }

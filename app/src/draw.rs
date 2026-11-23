@@ -306,4 +306,49 @@ mod tests {
         assert_eq!(white_bottom, black_bottom);
         assert!(white_bottom > BY + SQ * 7.0 - 1.0);
     }
+
+    /// Draws the board window in every look to /tmp/look-<id>.png, to compare them.
+    /// Run by hand: cargo test draw_every_look -- --ignored
+    #[test]
+    #[ignore]
+    fn draw_every_look() {
+        use crate::game::Game;
+        use crate::pack::{load_pack, PACKS};
+        use crate::rails::Rails;
+        use crate::text::Txt;
+        use shakmaty::{fen::Fen, CastlingMode, Chess};
+        let txt = Txt::load();
+        let rails = Rails::new();
+        let names: Vec<String> = PACKS.iter().map(|p| p.0.to_string()).collect();
+        let mut g = Game::new();
+        g.pos = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 0 5"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position::<Chess>(CastlingMode::Standard)
+            .unwrap();
+        g.last = Some(("d2".parse().unwrap(), "d3".parse().unwrap()));
+        for (i, (id, _, _)) in PACKS.iter().enumerate() {
+            let (th, pieces) = load_pack(i);
+            let (w, h) = ((W * 2.0) as usize, (H * 2.0) as usize);
+            let mut px = vec![0u32; w * h];
+            let v = View {
+                th: &th,
+                pieces: &pieces,
+                tile: 128.0,
+                txt: &txt,
+                kb_file: None,
+                kb_rank: None,
+                thinking_dots: 1,
+                show_pack_name: false,
+                rails: &rails,
+                pack: i,
+                pack_names: &names,
+                slide: None,
+            };
+            let mut cv = Canvas::new(&mut px, w, h, 2.0);
+            frame(&mut cv, &g, &v);
+            cv.save_png(std::path::Path::new(&format!("/tmp/look-{id}.png")), None)
+                .unwrap();
+        }
+    }
 }

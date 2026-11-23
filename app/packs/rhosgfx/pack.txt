@@ -1,0 +1,28 @@
+# Side Chess pack: Peach. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Peach
+
+background = #F4F6F8
+accent = #E07B53
+title = #2D3A4A
+text = #22262B
+muted = #79818C
+status_your_move = #2D3A4A
+status_waiting = #79818C
+status_over = #8B4C33
+
+board_border = #2D3A4A
+light_square = #E3E8EE
+dark_square = #8FA3B8
+last_from = #E07B5340
+last_to = #E07B5380
+last_outline = #8B4C33
+selected = #E07B5399
+target = #E07B538C
+target_outline = #2D3A4A
+half_typed = #2D3A4A38
+move_dot = #2D3A4A47
+
+banner = #F4F6F8
+banner_title = #2D3A4A
+banner_result = #8B4C33

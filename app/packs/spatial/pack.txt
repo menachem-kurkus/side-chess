@@ -1,0 +1,28 @@
+# Side Chess pack: Spatial. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Spatial
+
+background = #F2F6F8
+accent = #2FB3A6
+title = #17415A
+text = #192932
+muted = #6A8696
+status_your_move = #17415A
+status_waiting = #6A8696
+status_over = #1D6F67
+
+board_border = #17415A
+light_square = #E4EEF2
+dark_square = #7FA3B5
+last_from = #2FB3A640
+last_to = #2FB3A680
+last_outline = #1D6F67
+selected = #2FB3A699
+target = #2FB3A68C
+target_outline = #17415A
+half_typed = #17415A38
+move_dot = #17415A47
+
+banner = #F2F6F8
+banner_title = #17415A
+banner_result = #1D6F67

@@ -1,0 +1,28 @@
+# Side Chess pack: Fantasy. The pieces are drawn by someone else; see CREDITS.md.
+# Colours are #RRGGBB, or #RRGGBBAA for see-through. Any key left out falls back to blue-gold.
+name = Fantasy
+
+background = #F1EEF6
+accent = #D9A441
+title = #3B2F63
+text = #282235
+muted = #80789B
+status_your_move = #3B2F63
+status_waiting = #80789B
+status_over = #876628
+
+board_border = #3B2F63
+light_square = #E7E1F3
+dark_square = #8F82B8
+last_from = #D9A44140
+last_to = #D9A44180
+last_outline = #876628
+selected = #D9A44199
+target = #D9A4418C
+target_outline = #3B2F63
+half_typed = #3B2F6338
+move_dot = #3B2F6347
+
+banner = #F1EEF6
+banner_title = #3B2F63
+banner_result = #876628
