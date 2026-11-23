@@ -36,7 +36,7 @@ banner_result = #8B6914
 
 # pieces, drawn at build time from piece_font unless the pack has its own pieces.png
 # (768 x 256: King Queen Rook Bishop Knight Pawn across, white row then black row, 128 px each)
-piece_font = /System/Library/Fonts/Apple Symbols.ttf | C:/Windows/Fonts/seguisym.ttf
+piece_font = /System/Library/Fonts/Apple Symbols.ttf | C:/Windows/Fonts/seguisym.ttf | /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 piece_white = #FFFFFF
 piece_black = #1B1917
 # true takes the crosses off the king and the bishop

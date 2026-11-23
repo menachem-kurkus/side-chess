@@ -1,14 +1,15 @@
 // Draws the chess pieces and the few text sizes the app uses into small
-// images at build time, from fonts every Mac and Windows PC already has. Shipping images
+// images at build time, from fonts every Mac and Windows PC already has (on Linux,
+// for CI, free look-alikes: Liberation Sans and DejaVu Sans). Shipping images
 // made from Apple's fonts isn't allowed, and loading the fonts at run time
 // would cost about 45 MB of memory, so they're baked here instead.
 use fontdue::{Font, FontSettings};
 use std::{env, fs, path::Path};
 
 // A font is one path, or several separated by "|" (the first one found is used).
-const ARIAL: &str = "/System/Library/Fonts/Supplemental/Arial.ttf|C:/Windows/Fonts/arial.ttf";
+const ARIAL: &str = "/System/Library/Fonts/Supplemental/Arial.ttf|C:/Windows/Fonts/arial.ttf|/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf";
 const ARIAL_BOLD: &str =
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf|C:/Windows/Fonts/arialbd.ttf";
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf|C:/Windows/Fonts/arialbd.ttf|/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf";
 
 fn font(paths: &str) -> Font {
     let bytes = paths
@@ -16,7 +17,7 @@ fn font(paths: &str) -> Font {
         .map(str::trim)
         .find_map(|p| fs::read(p).ok())
         .unwrap_or_else(|| {
-            panic!("Side Chess builds on macOS and Windows only: none of {paths} found")
+            panic!("Side Chess needs a Mac or Windows font (or Liberation Sans and DejaVu Sans on Linux): none of {paths} found")
         });
     Font::from_bytes(bytes, FontSettings::default()).unwrap()
 }

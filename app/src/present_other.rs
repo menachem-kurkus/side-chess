@@ -45,7 +45,7 @@ impl Presenter {
         if let Ok(mut buf) = surface.buffer_mut() {
             paint(&mut buf);
             let _ = buf.present();
-        }
+        };
     }
 }
 

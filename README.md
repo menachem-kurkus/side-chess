@@ -56,7 +56,7 @@ Looks are **packs** (press T to switch; `No Crosses` is the Blue and Gold look w
 
 ## Contributing
 
-Pull requests are welcome. Tests, formatting, the plugin check and a memory check (under 100 MB) must pass; GitHub runs them on a Mac and on Windows for every change. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Pull requests are welcome. Tests, formatting, the plugin check and a memory check (under 100 MB) must pass; GitHub runs them on a Mac, on Windows and on Linux (tests and the plugin check only) for every change. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
