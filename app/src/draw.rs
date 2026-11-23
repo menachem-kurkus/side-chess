@@ -161,6 +161,23 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     cv.rrect(W - BX - sw - 28.0, 20.0, sw + 28.0, 36.0, 18.0, capsule);
     txt.draw(cv, "b18", &status, W - BX - sw - 14.0, 44.0, capsule_ink);
 
+    // A replay whose positions are all scored: how each side played, the person first
+    if let Some(sc) = run.and_then(|r| r.score) {
+        let x = BX + 18.0 + txt.width("b30", "Chess") + 28.0;
+        for side in [Side::White, Side::Black] {
+            let s = sc.of(side);
+            let mine = side == g.player;
+            let line = format!(
+                "{} {:.0}% accurate, about {}",
+                if mine { "You" } else { "AI" },
+                s.accuracy,
+                crate::score::estimate(s.acpl)
+            );
+            let row = if mine { 0.0 } else { 1.0 };
+            txt.draw(cv, "r14", &line, x, 38.0 + 20.0 * row, on_band);
+        }
+    }
+
     // Where the selected piece can go (castling shows the king's square)
     let mut goes: Vec<Square> = vec![];
     if let Some(from) = g.selected {
@@ -554,6 +571,18 @@ fn draw_picker(
         by + 40.0,
         th.banner_title,
     );
+    if let Some(r) = v.replay.map(|r| &r.ratings) {
+        let t = if r.you.games == 0 {
+            "No rated games yet".to_string()
+        } else {
+            format!(
+                "You {:.0} (+/- {:.0})   AI {:.0} (+/- {:.0})",
+                r.you.rating, r.you.rd, r.ai.rating, r.ai.rd
+            )
+        };
+        let x = bx + bw - 20.0 - txt.width("r14", &t);
+        txt.draw(cv, "r14", &t, x, by + 40.0, th.muted);
+    }
     if pk.entries.is_empty() {
         let lines = [
             "No saved games yet.",
@@ -698,5 +727,97 @@ mod tests {
         assert_eq!(promotion_at(gap_x, oy + 90.0), None);
         assert_eq!(promotion_at(ox + 40.0, oy + 10.0), None);
         assert_eq!(promotion_at(5.0, 5.0), None);
+    }
+
+    /// Draws a replay (scored with made-up numbers) and the saved-games list to PNGs in
+    /// $SIDE_CHESS_PNG_DIR, with no window. Run by hand:
+    /// SIDE_CHESS_PNG_DIR=/tmp cargo test draw_replay_sheet -- --ignored
+    #[test]
+    #[ignore]
+    fn draw_replay_sheet() {
+        use crate::engine::Eval;
+        use crate::pack::{load_pack, PACKS};
+        use crate::rails::Rails;
+        use crate::replay::{parse_pgn, Entry, Picker, Run, State};
+        use crate::text::Txt;
+        let dir = std::env::var("SIDE_CHESS_PNG_DIR").unwrap_or("/tmp".into());
+        let txt = Txt::load();
+        let rails = Rails::new();
+        let names: Vec<String> = PACKS.iter().map(|p| p.0.to_string()).collect();
+        let (th, pieces) = load_pack(0);
+        let p =
+            parse_pgn("1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 6. d4 exd4 *").unwrap();
+        let mut run = Run::new(&p, "2026-11-23 09:10".into());
+        let n = run.total() + 1;
+        run.evals = (0..n)
+            .map(|i| {
+                Some(Eval {
+                    cp: [20, 25, 20, 30, 35, 30, 40, -90, -80, -85, -60, 150][i.min(11)],
+                    mate: None,
+                    best: Some(("g1".parse().unwrap(), "f3".parse().unwrap())),
+                })
+            })
+            .collect();
+        run.score = Some(crate::score::Score::from_moves(&[
+            (20, 15),
+            (25, 20),
+            (20, 10),
+            (-30, -40),
+            (35, 20),
+            (-30, 100),
+            (40, -90),
+            (80, 70),
+            (90, 60),
+            (60, 50),
+            (-150, -350),
+        ]));
+        run.goto(8);
+        let mut st = State::default();
+        st.ratings.you.games = 3;
+        st.ratings.you.rating = 1523.0;
+        st.ratings.you.rd = 180.0;
+        st.run = Some(run);
+        let mut picker_st = State::default();
+        picker_st.ratings = st.ratings.clone();
+        picker_st.picker = Some(Picker {
+            entries: vec![Entry {
+                path: "x.pgn".into(),
+                cols: [
+                    "2026-11-23 09:10".into(),
+                    "White".into(),
+                    "Won".into(),
+                    "36 moves".into(),
+                ],
+            }],
+            sel: 0,
+            top: 0,
+        });
+        let g = Game::new();
+        for (name, state) in [("replay", &st), ("picker", &picker_st)] {
+            let (w, h) = ((W * 2.0) as usize, (H * 2.0) as usize);
+            let mut px = vec![0u32; w * h];
+            let v = View {
+                th: &th,
+                pieces: &pieces,
+                tile: 128.0,
+                txt: &txt,
+                kb_file: None,
+                kb_rank: None,
+                thinking_dots: 1,
+                show_pack_name: false,
+                rails: &rails,
+                pack: 0,
+                pack_names: &names,
+                piece_names: &names,
+                pieces_row: 0,
+                slide: None,
+                arrows: false,
+                replay: Some(state),
+            };
+            let mut cv = Canvas::new(&mut px, w, h, 2.0);
+            frame(&mut cv, &g, &v);
+            cv.save_png(std::path::Path::new(&format!("{dir}/{name}.png")), None)
+                .unwrap();
+        }
     }
 }

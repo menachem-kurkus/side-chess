@@ -20,8 +20,10 @@ mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
 mod present;
 mod rails;
+mod rating;
 mod replay;
 mod save;
+mod score;
 mod text;
 mod threats;
 
@@ -374,7 +376,12 @@ impl App {
     /// Keep the game on disk once it is over (see save.rs for the rules).
     fn autosave(&mut self) {
         if game_over(&self.g.pos, self.g.player).is_some() {
-            save::save(&mut self.g);
+            let saved = save::save(&mut self.g);
+            // the result moves both ratings, once per game
+            if let (Some(path), false) = (saved, self.g.rated) {
+                rating::record_game(&path);
+                self.g.rated = true;
+            }
         }
     }
 

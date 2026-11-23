@@ -3,7 +3,9 @@
 //! never touches the live game or the files shared with the AI (state.txt).
 use crate::engine::{self, Engine, Eval, Grade};
 use crate::game::{shown_to, Game};
+use crate::rating::{self, Ratings};
 use crate::save::games_dir;
+use crate::score::{self, Score};
 use shakmaty::{fen::Fen, san::San, CastlingMode, Chess, Color as Side, Move, Position, Square};
 use std::{fs, path::PathBuf, str::FromStr};
 
@@ -123,6 +125,8 @@ pub struct Run {
     engine: Option<Engine>,
     pub evals: Vec<Option<Eval>>, // what the engine thinks of each position, as it gets there
     pub engine_missing: bool,     // no Stockfish was found
+    pub score: Option<Score>,     // how each side played, once every position is scored
+    pgn: Option<std::path::PathBuf>, // the saved game this is, to keep the score beside it
 }
 
 impl Run {
@@ -147,6 +151,8 @@ impl Run {
             engine: None,
             evals: vec![],
             engine_missing: false,
+            score: None,
+            pgn: None,
         };
         run.goto(0);
         run
@@ -171,6 +177,23 @@ impl Run {
             if let Some(slot) = self.evals.get_mut(i) {
                 *slot = Some(eval);
                 got = true;
+            }
+        }
+        if got && self.score.is_none() && self.analysed() == self.evals.len() {
+            let moves: Option<Vec<(i32, i32)>> = (1..=self.total())
+                .map(|i| {
+                    // both scores from the mover's side
+                    let white = self.positions[i - 1].turn() == Side::White;
+                    let sign = if white { 1 } else { -1 };
+                    let (b, a) = (self.evals[i - 1].as_ref()?, self.evals[i].as_ref()?);
+                    Some((b.cp * sign, a.cp * sign))
+                })
+                .collect();
+            self.score = moves
+                .filter(|m| !m.is_empty())
+                .map(|m| Score::from_moves(&m));
+            if let (Some(s), Some(p)) = (&self.score, &self.pgn) {
+                score::save(p, s);
             }
         }
         got
@@ -313,6 +336,7 @@ impl Picker {
 /// The replay part of the window: the list open, a game open, or neither.
 #[derive(Default)]
 pub struct State {
+    pub ratings: Ratings, // both Glicko-2 ratings, read when the list opens
     pub picker: Option<Picker>,
     pub run: Option<Run>,
     pub error: Option<String>,
@@ -327,6 +351,7 @@ impl State {
     pub fn open_list(&mut self) {
         self.error = None;
         self.engine_found = engine::find_engine().is_some();
+        self.ratings = rating::load();
         self.picker = Some(Picker {
             entries: list_games(),
             sel: 0,
@@ -347,6 +372,8 @@ impl State {
         match loaded {
             Ok(p) => {
                 let mut run = Run::new(&p, e.cols[0].clone());
+                run.score = score::load(&e.path);
+                run.pgn = Some(e.path.clone());
                 match engine::find_engine() {
                     Some(path) => run.start_analysis(path),
                     None => run.engine_missing = true,
@@ -570,5 +597,40 @@ mod tests {
             Some(Grade::Blunder),
             "2.g4 allows mate"
         );
+    }
+
+    /// Scores her game 1 (from the review notes) with a real Stockfish and prints both sides.
+    /// Run by hand: cargo test score_game_one -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn score_game_one_with_real_stockfish() {
+        let path = engine::find_engine().expect("no Stockfish found");
+        let home = std::env::var("HOME").unwrap();
+        let text = fs::read_to_string(format!("{home}/Documents/Chess/Game Reviews.md")).unwrap();
+        let moves = text
+            .lines()
+            .find(|l| l.starts_with("`1. "))
+            .unwrap()
+            .trim_matches('`');
+        let p = parse_pgn(moves).unwrap();
+        let mut r = Run::new(&p, String::new());
+        r.start_analysis(path);
+        let start = std::time::Instant::now();
+        while r.score.is_none() && start.elapsed().as_secs() < 240 {
+            r.poll();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let sc = r.score.expect("scored in time");
+        for (n, side) in [("white (Ann)", Side::White), ("black (AI)", Side::Black)] {
+            let s = sc.of(side);
+            println!(
+                "{n}: {} moves, avg loss {:.0} cp, accuracy {:.0}%, about {}",
+                s.moves,
+                s.acpl,
+                s.accuracy,
+                crate::score::estimate(s.acpl)
+            );
+        }
+        println!("took {:?}", start.elapsed());
     }
 }
