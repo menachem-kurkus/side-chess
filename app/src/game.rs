@@ -21,6 +21,7 @@ pub struct Game {
     pub last: Option<(Square, Square)>,
     pub note: String,
     pub promotion: Option<(Square, Square)>, // a pawn's last step waiting for the piece the person picks
+    pub saved: Option<(PathBuf, usize)>, // the file this game was saved to, and how many moves it had then
     pub hint: String, // shown in the window only, never in state.txt (a non-empty `note:` there makes the AI think its move was refused)
 }
 
@@ -42,6 +43,7 @@ impl Game {
             last: None,
             note: String::new(),
             promotion: None,
+            saved: None,
             hint: String::new(),
         }
     }

@@ -19,6 +19,7 @@ mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
 mod present;
 mod rails;
+mod save;
 mod text;
 
 use canvas::{Canvas, Img};
@@ -361,6 +362,13 @@ impl App {
         });
     }
 
+    /// Keep the game on disk once it is over (see save.rs for the rules).
+    fn autosave(&mut self) {
+        if game_over(&self.g.pos, self.g.player).is_some() {
+            save::save(&mut self.g);
+        }
+    }
+
     fn my_turn(&self) -> bool {
         self.g.pos.turn() == self.g.player && game_over(&self.g.pos, self.g.player).is_none()
     }
@@ -452,11 +460,15 @@ impl App {
                         f @ 'a'..='h' => self.kb_file = Some(f as u32 - 'a' as u32),
                         r @ '1'..='8' => self.kb_rank = Some(r as u32 - '1' as u32),
                         'n' => {
+                            save::save(&mut self.g);
                             self.g = Game::new_as(self.g.player);
                             write_state(&self.g);
                         }
                         // swap sides: only between games (refused mid-game: press N first)
-                        's' => self.g.swap_sides(),
+                        's' => {
+                            self.autosave();
+                            self.g.swap_sides();
+                        }
                         'u' => self.g.undo(),
                         't' if PACKS.len() > 1 => self.set_pack(self.pack + 1),
                         'p' => self.shot = true,
@@ -701,10 +713,16 @@ impl ApplicationHandler for App {
         }
     }
 
+    // Quitting: keep the game being played
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        save::save(&mut self.g);
+    }
+
     // Between events: look for the opponent's move, a screenshot request, and time-based changes.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         let before = (self.g.sans.len(), self.g.note.clone());
         check_opponent_move(&mut self.g);
+        self.autosave();
         if (self.g.sans.len(), self.g.note.clone()) != before {
             self.dirty = true;
         }
