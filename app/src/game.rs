@@ -20,6 +20,7 @@ pub struct Game {
     pub target: Option<Square>, // keyboard: square offered for the selected piece, played on Enter
     pub last: Option<(Square, Square)>,
     pub note: String,
+    pub hint: String, // shown in the window only (never in state.txt), e.g. a refused key
 }
 
 impl Game {
@@ -39,6 +40,19 @@ impl Game {
             target: None,
             last: None,
             note: String::new(),
+            hint: String::new(),
+        }
+    }
+
+    /// S swaps sides, but only between games: a new game that hasn't started or
+    /// one that is over. Mid-game it is refused with a hint and nothing changes.
+    pub fn swap_sides(&mut self) {
+        let in_progress = !self.sans.is_empty() && game_over(&self.pos, self.player).is_none();
+        if in_progress {
+            self.hint = "Game in progress. Press N for a new game, then S to swap sides.".into();
+        } else {
+            *self = Game::new_as(self.player.other());
+            write_state(self);
         }
     }
 
@@ -51,6 +65,7 @@ impl Game {
         self.selected = None;
         self.target = None;
         self.note.clear();
+        self.hint.clear();
         write_state(self);
     }
 
@@ -614,6 +629,29 @@ mod tests {
         g.undo();
         assert_eq!(g.pos.turn(), Side::Black, "back to a move the player makes");
         assert_eq!(g.sans.len(), 2);
+    }
+
+    #[test]
+    fn s_mid_game_is_refused_and_only_works_between_games() {
+        setup();
+        // a game in progress: refused, nothing changes
+        let mut g = from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        g.sans.push("e4".into());
+        g.swap_sides();
+        assert_eq!(g.player, Side::White);
+        assert_eq!(g.sans.len(), 1, "the game is not restarted");
+        assert!(g.hint.contains("Press N"), "{}", g.hint);
+        // a fresh game: swaps, and the AI (white) opens
+        let mut fresh = Game::new();
+        fresh.swap_sides();
+        assert_eq!(fresh.player, Side::Black);
+        assert!(fresh.hint.is_empty());
+        // a finished game: swaps
+        let mut over = from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3");
+        over.sans.push("Qh4#".into());
+        over.swap_sides();
+        assert_eq!(over.player, Side::Black);
+        assert!(over.sans.is_empty());
     }
 
     #[test]
