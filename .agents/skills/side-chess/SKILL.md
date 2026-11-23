@@ -1,11 +1,11 @@
 ---
 name: side-chess
-description: Play as the black opponent in the Side Chess desktop app when the user starts or continues a Side Chess game.
+description: Play as the AI opponent (black, or white after the user presses S) in the Side Chess desktop app when the user starts or continues a Side Chess game.
 ---
 
 # Side Chess
 
-The user plays white in the Side Chess window. You play black when asked to play or continue. The app stores the current position in `~/.side-chess/state.txt` (on Windows, `%USERPROFILE%\.side-chess\state.txt`) and reads your move from `opponent_move.txt` in that same folder. This skill expects app version 0.2.2 or later. No API key or network connection is needed during play.
+The user plays white in the Side Chess window by default, and you play black when asked to play or continue. The user can press S to swap sides between games (the app refuses it mid-game), and then you play white. You play whichever side `state.txt` marks `(AI)`. The app stores the current position in `~/.side-chess/state.txt` (on Windows, `%USERPROFILE%\.side-chess\state.txt`) and reads your move from `opponent_move.txt` in that same folder. This skill expects app version 0.2.2 or later; swapping sides needs 0.3.0 or later. No API key or network connection is needed during play.
 
 ## Check the app version
 
@@ -14,7 +14,7 @@ When a game starts, read `~/.side-chess/app_version.txt` (written by the install
 ## Take a turn
 
 1. Read the full `state.txt` whenever the user starts a game or asks for your move. Use the current `fen:`, move list, board, and `legal:` list; never rely on a position from an earlier turn.
-2. If `turn:` is `game over: ...`, report the result. If it is `white (player)`, tell the user it is their turn. Play only when the line starts with `turn: black` (`black (AI)`, or `black (Claude)` from apps before 0.2.2).
+2. If `turn:` is `game over: ...`, report the result. If it says `(player)` (`white (player)` or `black (player)`), tell the user it is their turn. Play only when the line says `(AI)` (`black (AI)` or `white (AI)`, or `black (Claude)` from apps before 0.2.2). When the AI is white it moves first, so a new game can already be waiting for your move.
 3. Choose a legal move from `legal:`. Play sound, friendly chess at a club level. Prefer a move that responds to the user's threats and leaves your king safe.
 4. Write exactly one SAN move, such as `Nf6`, to `~/.side-chess/opponent_move.txt`. On Windows, use an ASCII write so the file has no byte-order mark:
 

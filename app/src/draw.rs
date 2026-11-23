@@ -25,16 +25,29 @@ pub struct View<'a> {
     pub show_pack_name: bool, // for two seconds after T
 }
 
-pub fn square_xy(s: Square) -> (f32, f32) {
+/// Where a square is drawn. The player's own pieces are at the bottom, so the
+/// board is turned round when the player has black (`flip`).
+pub fn square_xy(s: Square, flip: bool) -> (f32, f32) {
     let f = u32::from(s.file()) as f32;
     let r = u32::from(s.rank()) as f32;
-    (BX + f * SQ, BY + (7.0 - r) * SQ)
+    if flip {
+        (BX + (7.0 - f) * SQ, BY + r * SQ)
+    } else {
+        (BX + f * SQ, BY + (7.0 - r) * SQ)
+    }
 }
 
 /// The square under a point in the window, if any.
-pub fn square_at(x: f32, y: f32) -> Option<Square> {
+pub fn square_at(x: f32, y: f32, flip: bool) -> Option<Square> {
     let (fx, ry) = ((x - BX) / SQ, (y - BY) / SQ);
-    ((0.0..8.0).contains(&fx) && (0.0..8.0).contains(&ry)).then(|| sq(fx as u32, 7 - ry as u32))
+    ((0.0..8.0).contains(&fx) && (0.0..8.0).contains(&ry)).then(|| {
+        let (col, row) = (fx as u32, ry as u32);
+        if flip {
+            sq(7 - col, row)
+        } else {
+            sq(col, 7 - row)
+        }
+    })
 }
 
 /// Pieces image: King Queen Rook Bishop Knight Pawn across; white row, then black row.
@@ -52,14 +65,15 @@ fn piece_tile(role: Role, side: Side) -> (f32, f32) {
 
 pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     let (th, txt) = (v.th, v.txt);
+    let flip = g.player == Side::Black;
 
     // Header
     cv.clear(th.background);
     cv.rect(BX, 30.0, 6.0, 40.0, th.accent);
     txt.draw(cv, "b30", "Chess", BX + 18.0, 58.0, th.title);
-    let (status, col) = match game_over(&g.pos) {
+    let (status, col) = match game_over(&g.pos, g.player) {
         Some(_) => ("Game over".to_string(), th.status_over),
-        None if g.pos.turn() == Side::White => (
+        None if g.pos.turn() == g.player => (
             if g.pos.is_check() {
                 "Your move. You're in check."
             } else {
@@ -103,7 +117,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     for r in 0..8u32 {
         for f in 0..8u32 {
             let s = sq(f, r);
-            let (x, y) = square_xy(s);
+            let (x, y) = square_xy(s, flip);
             let light = (f + r) % 2 == 1;
             cv.rect(
                 x,
@@ -142,10 +156,11 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             } else {
                 th.light_square
             };
-            if f == 0 {
+            // rank numbers down the left edge, file letters along the bottom edge
+            if f == if flip { 7 } else { 0 } {
                 txt.draw(cv, "b11", &(r + 1).to_string(), x + 4.0, y + 14.0, lbl);
             }
-            if r == 0 {
+            if r == if flip { 7 } else { 0 } {
                 let file = ((b'a' + f as u8) as char).to_string();
                 txt.draw(cv, "b11", &file, x + SQ - 11.0, y + SQ - 5.0, lbl);
             }
@@ -176,7 +191,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     }
 
     // Game over: banner across the board
-    if let Some(msg) = game_over(&g.pos) {
+    if let Some(msg) = game_over(&g.pos, g.player) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
         let (bw, bh) = (380.0, 150.0);
         let (bx, by) = (BX + (SQ * 8.0 - bw) / 2.0, BY + (SQ * 8.0 - bh) / 2.0);
@@ -216,6 +231,8 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     txt.draw(cv, "r16", &moves, BX, fy, th.text);
     if !g.note.is_empty() {
         txt.draw(cv, "r14", &g.note, BX, fy + 26.0, th.error);
+    } else if !g.hint.is_empty() {
+        txt.draw(cv, "r14", &g.hint, BX, fy + 26.0, th.error);
     }
     if v.show_pack_name {
         txt.draw(
@@ -226,5 +243,32 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             fy,
             th.muted,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_click_lands_on_the_square_that_was_drawn_there_either_way_up() {
+        for flip in [false, true] {
+            for f in 0..8 {
+                for r in 0..8 {
+                    let s = sq(f, r);
+                    let (x, y) = square_xy(s, flip);
+                    assert_eq!(square_at(x + SQ / 2.0, y + SQ / 2.0, flip), Some(s));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_players_own_back_rank_is_at_the_bottom() {
+        // white at the bottom normally; black at the bottom when flipped
+        let (_, white_bottom) = square_xy(sq(4, 0), false);
+        let (_, black_bottom) = square_xy(sq(4, 7), true);
+        assert_eq!(white_bottom, black_bottom);
+        assert!(white_bottom > BY + SQ * 7.0 - 1.0);
     }
 }

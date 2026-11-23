@@ -1,6 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
-//! Side Chess: you play white in this window; an AI session plays black
-//! by reading ~/.side-chess/state.txt and writing its move to
+//! Side Chess: you play white in this window (S swaps sides); an AI session plays
+//! the other side by reading ~/.side-chess/state.txt and writing its move to
 //! ~/.side-chess/opponent_move.txt or the legacy claude_move.txt.
 //!
 //! Where things live:
@@ -110,20 +110,21 @@ impl App {
     }
 
     fn my_turn(&self) -> bool {
-        self.g.pos.turn() == Side::White && game_over(&self.g.pos).is_none()
+        self.g.pos.turn() == self.g.player && game_over(&self.g.pos, self.g.player).is_none()
     }
 
     fn click(&mut self) {
         if !self.my_turn() {
             return;
         }
-        let Some(clicked) = square_at(self.mouse.0, self.mouse.1) else {
+        let flip = self.g.player == Side::Black;
+        let Some(clicked) = square_at(self.mouse.0, self.mouse.1, flip) else {
             return;
         };
         let g = &mut self.g;
         if let Some(m) = g.selected.and_then(|from| legal_to(&g.pos, from, clicked)) {
             g.play(&m);
-        } else if g.pos.board().piece_at(clicked).map(|p| p.color) == Some(Side::White) {
+        } else if g.pos.board().piece_at(clicked).map(|p| p.color) == Some(g.player) {
             g.target = None;
             g.selected = if g.selected == Some(clicked) {
                 None
@@ -169,9 +170,11 @@ impl App {
                         f @ 'a'..='h' => self.kb_file = Some(f as u32 - 'a' as u32),
                         r @ '1'..='8' => self.kb_rank = Some(r as u32 - '1' as u32),
                         'n' => {
-                            self.g = Game::new();
+                            self.g = Game::new_as(self.g.player);
                             write_state(&self.g);
                         }
+                        // swap sides: only between games (refused mid-game: press N first)
+                        's' => self.g.swap_sides(),
                         'u' => self.g.undo(),
                         't' if PACKS.len() > 1 => {
                             self.pack = (self.pack + 1) % PACKS.len();
@@ -330,7 +333,7 @@ impl ApplicationHandler for App {
             self.shot = true;
             self.dirty = true;
         }
-        if self.g.pos.turn() == Side::Black && game_over(&self.g.pos).is_none() {
+        if self.g.pos.turn() != self.g.player && game_over(&self.g.pos, self.g.player).is_none() {
             let dots = (self.start.elapsed().as_millis() / 500 % 3) as usize + 1;
             if dots != self.dots {
                 self.dots = dots;
