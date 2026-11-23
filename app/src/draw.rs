@@ -1,6 +1,6 @@
 //! What the window shows. Every colour comes from the pack (`th`), every size
 //! from the layout constants below, so a new look never needs code changes.
-use crate::canvas::{Canvas, Img};
+use crate::canvas::{Canvas, Color, Img};
 use crate::game::{game_over, move_list, shown_to, sq, Game};
 use crate::pack::Theme;
 use crate::rails::Rails;
@@ -13,6 +13,7 @@ pub const BX: f32 = 28.0; // board left
 pub const BY: f32 = 96.0; // board top
 pub const W: f32 = BX * 2.0 + SQ * 8.0;
 pub const H: f32 = BY + SQ * 8.0 + 76.0;
+const HEADER_H: f32 = 78.0; // the header band across the top
 
 /// Everything a frame needs to know beyond the game itself.
 pub struct View<'a> {
@@ -27,6 +28,7 @@ pub struct View<'a> {
     pub rails: &'a Rails,     // the thin side panels
     pub pack: usize,          // which look is in use
     pub pack_names: &'a [String],
+    pub slide: Option<f32>, // 0..1 while the last move's piece is sliding into place
 }
 
 /// Where a square is drawn. The player's own pieces are at the bottom, so the
@@ -71,12 +73,19 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     let (th, txt) = (v.th, v.txt);
     let flip = g.player == Side::Black;
 
-    // Header
+    // The window is one flat colour; the header is a blended band across the top
     cv.clear(th.background);
-    cv.rect(BX, 30.0, 6.0, 40.0, th.accent);
-    txt.draw(cv, "b30", "Chess", BX + 18.0, 58.0, th.title);
-    let (status, col) = match game_over(&g.pos, g.player) {
-        Some(_) => ("Game over".to_string(), th.status_over),
+    let (band0, band1) = (
+        th.board_border,
+        th.board_border.mix(Color::rgba8(0, 0, 0, 255), 0.72),
+    );
+    cv.vgrad(0.0, 0.0, W, HEADER_H, band0, band1);
+    let on_band = band0.ink(th.background, th.text);
+    cv.rect(BX, 22.0, 6.0, 36.0, th.accent);
+    txt.draw(cv, "b30", "Chess", BX + 18.0, 51.0, on_band);
+    // the status sits in a capsule: gold-accent when it is your move, quiet otherwise
+    let (status, capsule) = match game_over(&g.pos, g.player) {
+        Some(_) => ("Game over".to_string(), band0.mix(on_band, 0.78)),
         None if g.pos.turn() == g.player => (
             if g.pos.is_check() {
                 "Your move. You're in check."
@@ -84,21 +93,21 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
                 "Your move"
             }
             .to_string(),
-            th.status_your_move,
+            if g.pos.is_check() {
+                th.error
+            } else {
+                th.accent
+            },
         ),
         None => (
             format!("AI is thinking{}", ".".repeat(v.thinking_dots)),
-            th.status_waiting,
+            band0.mix(on_band, 0.72),
         ),
     };
-    txt.draw(
-        cv,
-        "b18",
-        &status,
-        W - BX - txt.width("b18", &status),
-        56.0,
-        col,
-    );
+    let sw = txt.width("b18", &status);
+    let capsule_ink = capsule.ink(th.background, th.text);
+    cv.rrect(W - BX - sw - 28.0, 20.0, sw + 28.0, 36.0, 18.0, capsule);
+    txt.draw(cv, "b18", &status, W - BX - sw - 14.0, 44.0, capsule_ink);
 
     // Where the selected piece can go (castling shows the king's square)
     let mut goes: Vec<Square> = vec![];
@@ -110,7 +119,8 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         }
     }
 
-    // Board
+    // Board, lifted off the page by a soft shadow
+    cv.shadow(BX - 4.0, BY - 4.0, SQ * 8.0 + 8.0, SQ * 8.0 + 8.0, 7);
     cv.rect(
         BX - 4.0,
         BY - 4.0,
@@ -155,8 +165,9 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
                 cv.rect(x, y, SQ, SQ, th.target);
                 cv.rect_lines(x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0, 5.0, th.target_outline);
             }
+            // coordinates: dark ink on a light square, light on a dark one, so they read
             let lbl = if light {
-                th.dark_square
+                th.board_border
             } else {
                 th.light_square
             };
@@ -168,7 +179,9 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
                 let file = ((b'a' + f as u8) as char).to_string();
                 txt.draw(cv, "b11", &file, x + SQ - 11.0, y + SQ - 5.0, lbl);
             }
-            if let Some(p) = g.pos.board().piece_at(s) {
+            // the piece that just moved is drawn last while it slides
+            let sliding = v.slide.is_some() && g.last.map(|l| l.1) == Some(s);
+            if let Some(p) = g.pos.board().piece_at(s).filter(|_| !sliding) {
                 if p.role == Role::King && p.color == g.pos.turn() && g.pos.is_check() {
                     cv.rect(x, y, SQ, SQ, th.check);
                     cv.rect_lines(x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0, 4.0, th.check_outline);
@@ -194,13 +207,31 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         }
     }
 
+    // The piece that has just moved glides from its old square to its new one
+    if let (Some(t), Some((from, to))) = (v.slide, g.last) {
+        if let Some(p) = g.pos.board().piece_at(to) {
+            let e = 1.0 - (1.0 - t).powi(3); // ease out
+            let ((fx, fy), (tx, ty)) = (square_xy(from, flip), square_xy(to, flip));
+            let (x, y) = (fx + (tx - fx) * e, fy + (ty - fy) * e);
+            let (sx, sy) = piece_tile(p.role, p.color);
+            let k = v.tile / 128.0;
+            cv.image(
+                v.pieces,
+                (sx * k, sy * k, v.tile, v.tile),
+                (x + 2.0, y + 2.0, SQ - 4.0, SQ - 4.0),
+                None,
+            );
+        }
+    }
+
     // Game over: banner across the board
     if let Some(msg) = game_over(&g.pos, g.player) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
         let (bw, bh) = (380.0, 150.0);
         let (bx, by) = (BX + (SQ * 8.0 - bw) / 2.0, BY + (SQ * 8.0 - bh) / 2.0);
-        cv.rect(bx, by, bw, bh, th.banner);
-        cv.rect(bx, by, bw, 6.0, th.accent);
+        cv.shadow(bx, by, bw, bh, 6);
+        cv.rrect(bx, by, bw, bh, 12.0, th.accent);
+        cv.rrect(bx, by + 6.0, bw, bh - 6.0, 12.0, th.banner);
         let (title, sub) = msg.split_once(". ").unwrap_or((&msg, ""));
         let center = |style: &str, t: &str| bx + (bw - txt.width(style, t)) / 2.0;
         txt.draw(

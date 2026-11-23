@@ -15,6 +15,31 @@ pub struct Color {
 }
 
 impl Color {
+    /// `t` of this colour and the rest of `other` (t = 1 is this colour), alpha kept from this one.
+    pub fn mix(self, other: Color, t: f32) -> Color {
+        let m = |a: f32, b: f32| a * t + b * (1.0 - t);
+        Color {
+            r: m(self.r, other.r),
+            g: m(self.g, other.g),
+            b: m(self.b, other.b),
+            a: self.a,
+        }
+    }
+
+    /// How light it looks, 0 (black) to 1 (white).
+    pub fn luma(self) -> f32 {
+        0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
+    }
+
+    /// Whichever of `a` and `b` stands out more from this colour (for text on it).
+    pub fn ink(self, a: Color, b: Color) -> Color {
+        if (a.luma() - self.luma()).abs() >= (b.luma() - self.luma()).abs() {
+            a
+        } else {
+            b
+        }
+    }
+
     pub fn rgba8(r: u8, g: u8, b: u8, a: u8) -> Self {
         let f = |v: u8| v as f32 / 255.0;
         Color {
@@ -228,6 +253,47 @@ impl<'a> Canvas<'a> {
                     self.px[i] = blend(self.px[i], [c.r, c.g, c.b], c.a * cover);
                 }
             }
+        }
+    }
+
+    /// A filled rectangle with rounded corners of radius `r`. Use solid colours: where a
+    /// see-through colour is used the corners are drawn twice and show darker.
+    pub fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, c: Color) {
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        self.rect(x + r, y, w - 2.0 * r, h, c);
+        self.rect(x, y + r, r, h - 2.0 * r, c);
+        self.rect(x + w - r, y + r, r, h - 2.0 * r, c);
+        for (cx, cy) in [
+            (x + r, y + r),
+            (x + w - r, y + r),
+            (x + r, y + h - r),
+            (x + w - r, y + h - r),
+        ] {
+            self.round(cx, cy, r, 0.0, c);
+        }
+    }
+
+    /// A top-to-bottom blend from `c0` to `c1`, drawn a pixel row at a time.
+    pub fn vgrad(&mut self, x: f32, y: f32, w: f32, h: f32, c0: Color, c1: Color) {
+        let rows = (h * self.scale).round().max(1.0) as i32;
+        for i in 0..rows {
+            let t = (i as f32 + 0.5) / rows as f32;
+            let c = c1.mix(c0, t);
+            self.rect(x, y + i as f32 / self.scale, w, 1.0 / self.scale + 0.01, c);
+        }
+    }
+
+    /// A soft shadow under a rectangle: a few stacked, faint, growing layers, nudged down.
+    /// Only the part outside the rectangle is drawn (the rectangle goes on top of it
+    /// anyway), so it costs about as much as its edge, not its area.
+    pub fn shadow(&mut self, x: f32, y: f32, w: f32, h: f32, layers: u32) {
+        let c = Color::rgba8(0, 0, 0, 9);
+        for i in 1..=layers {
+            let g = i as f32;
+            self.rect(x - g, y - g + 3.0, w + 2.0 * g, (g - 3.0).max(0.0), c); // above
+            self.rect(x - g, y + h, w + 2.0 * g, g + 3.0, c); // below
+            self.rect(x - g, y, g, h, c); // left
+            self.rect(x + w, y, g, h, c); // right
         }
     }
 

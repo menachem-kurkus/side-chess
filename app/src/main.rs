@@ -38,7 +38,7 @@ use std::{
 use text::Txt;
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalSize, PhysicalPosition},
+    dpi::{LogicalPosition, LogicalSize},
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState, NamedKey},
@@ -47,6 +47,9 @@ use winit::{
 
 /// How often the app looks for the opponent's move and a screenshot request.
 const POLL: Duration = Duration::from_millis(250);
+
+/// How long a moved piece glides to its square.
+const SLIDE: Duration = Duration::from_millis(150);
 
 /// One of the thin side windows (see rails.rs): its own window, docked beside the board.
 struct RailWin {
@@ -78,6 +81,8 @@ struct App {
     shot: bool,
     rails: Rails,
     rail_wins: Vec<RailWin>,
+    prev_moves: usize,                   // how many moves the last frame had
+    slide_from: Option<Instant>,         // when the last move's slide began
     native_seen: Option<native::Native>, // the system colours the native look was last built from
     pack_names: Vec<String>,
 }
@@ -125,6 +130,8 @@ impl App {
             rails: Rails::load(),
             rail_wins: vec![],
             native_seen: None,
+            prev_moves: 0,
+            slide_from: None,
             pack_names: (0..PACKS.len())
                 .map(|i| {
                     Theme::load(i)
@@ -201,13 +208,13 @@ impl App {
         let Ok(at) = main.inner_position() else {
             return;
         };
-        let s = main.scale_factor();
+        // In screen points, which mean the same on every display (pixels do not: the
+        // rails may be on a screen with a different scale from the board's).
+        let at: LogicalPosition<f64> = at.to_logical(main.scale_factor());
         for (p, x, _) in self.rails.layout() {
             if let Some(r) = self.rail_wins.iter().find(|r| r.panel == p) {
-                r.window.set_outer_position(PhysicalPosition::new(
-                    at.x + (x as f64 * s).round() as i32,
-                    at.y + (TOP as f64 * s).round() as i32,
-                ));
+                r.window
+                    .set_outer_position(LogicalPosition::new(at.x + x as f64, at.y + TOP as f64));
             }
         }
     }
@@ -245,6 +252,7 @@ impl App {
             rails: &self.rails,
             pack: self.pack,
             pack_names: &self.pack_names,
+            slide: None,
         };
         rw.presenter.frame(w, h, scale, screen, |px| {
             let mut cv = Canvas::new(px, w, h, scale as f32);
@@ -379,6 +387,19 @@ impl App {
             let tile = ((SQ - 4.0) as f64 * scale).round().max(1.0) as usize;
             self.sized = Some((scale, tile, self.pieces.with_tiles_of(tile)));
         }
+        // A move just played slides its piece across for a moment
+        let moves = self.g.sans.len();
+        if moves == self.prev_moves + 1 {
+            self.slide_from = Some(Instant::now());
+        }
+        self.prev_moves = moves;
+        let slide = self
+            .slide_from
+            .map(|t| t.elapsed().as_secs_f32() / SLIDE.as_secs_f32())
+            .filter(|t| *t < 1.0);
+        if slide.is_none() {
+            self.slide_from = None;
+        }
         let view = View {
             th: &self.th,
             pieces: self.sized.as_ref().map_or(&self.pieces, |s| &s.2),
@@ -393,6 +414,7 @@ impl App {
             rails: &self.rails,
             pack: self.pack,
             pack_names: &self.pack_names,
+            slide,
         };
         let Some(screen) = &self.screen else {
             return;
@@ -409,6 +431,10 @@ impl App {
                 let _ = cv.save_png(&live_dir().join("screen.png"), screen.icc());
             }
         });
+        // while a piece is sliding, ask for the next frame straight away
+        if slide.is_some() {
+            window.request_redraw();
+        }
     }
 }
 
