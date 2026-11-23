@@ -200,12 +200,17 @@ impl Drop for Engine {
 }
 
 fn run(path: PathBuf, jobs: Receiver<Vec<String>>, out: Sender<(usize, Eval)>) {
-    let Ok(mut child) = Command::new(&path)
-        .stdin(Stdio::piped())
+    let mut cmd = Command::new(&path);
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
+        .stderr(Stdio::null());
+    // the app is a Windows GUI program: without this a console window flashes up
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let Ok(mut child) = cmd.spawn() else {
         return;
     };
     let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
