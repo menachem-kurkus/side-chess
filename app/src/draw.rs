@@ -35,6 +35,37 @@ pub struct View<'a> {
 
 /// Where a square is drawn. The player's own pieces are at the bottom, so the
 /// board is turned round when the player has black (`flip`).
+// The box that asks which piece a pawn becomes: four tiles in a row over the board
+const PROMO_TILE: f32 = 68.0;
+const PROMO_GAP: f32 = 14.0;
+const PROMO_PAD: f32 = 24.0;
+const PROMO_W: f32 = PROMO_PAD * 2.0 + PROMO_TILE * 4.0 + PROMO_GAP * 3.0;
+const PROMO_H: f32 = 172.0;
+const PROMO_ROLES: [(Role, &str); 4] = [
+    (Role::Queen, "Q"),
+    (Role::Rook, "R"),
+    (Role::Bishop, "B"),
+    (Role::Knight, "N"),
+];
+
+fn promo_origin() -> (f32, f32) {
+    (
+        BX + (SQ * 8.0 - PROMO_W) / 2.0,
+        BY + (SQ * 8.0 - PROMO_H) / 2.0,
+    )
+}
+
+/// The piece under a point in the promotion box, if any.
+pub fn promotion_at(x: f32, y: f32) -> Option<Role> {
+    let (ox, oy) = promo_origin();
+    PROMO_ROLES.iter().enumerate().find_map(|(i, (role, _))| {
+        let tx = ox + PROMO_PAD + i as f32 * (PROMO_TILE + PROMO_GAP);
+        let ty = oy + 58.0;
+        ((tx..=tx + PROMO_TILE).contains(&x) && (ty..=ty + PROMO_TILE).contains(&y))
+            .then_some(*role)
+    })
+}
+
 pub fn square_xy(s: Square, flip: bool) -> (f32, f32) {
     let f = u32::from(s.file()) as f32;
     let r = u32::from(s.rank()) as f32;
@@ -226,6 +257,56 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
         }
     }
 
+    // A pawn on its last step: ask which piece it becomes
+    if g.promotion.is_some() {
+        cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
+        let (ox, oy) = promo_origin();
+        cv.shadow(ox, oy, PROMO_W, PROMO_H, 6);
+        cv.rrect(ox, oy, PROMO_W, PROMO_H, 12.0, th.accent);
+        cv.rrect(ox, oy + 6.0, PROMO_W, PROMO_H - 6.0, 12.0, th.banner);
+        txt.draw(
+            cv,
+            "b18",
+            "Become which piece?",
+            ox + PROMO_PAD,
+            oy + 40.0,
+            th.banner_title,
+        );
+        for (i, (role, letter)) in PROMO_ROLES.iter().enumerate() {
+            let tx = ox + PROMO_PAD + i as f32 * (PROMO_TILE + PROMO_GAP);
+            let ty = oy + 58.0;
+            cv.rect(
+                tx,
+                ty,
+                PROMO_TILE,
+                PROMO_TILE,
+                if i % 2 == 0 {
+                    th.light_square
+                } else {
+                    th.dark_square
+                },
+            );
+            cv.rect_lines(tx, ty, PROMO_TILE, PROMO_TILE, 2.0, th.board_border);
+            let (sx, sy) = piece_tile(*role, g.player);
+            let k = v.tile / 128.0;
+            cv.image(
+                v.pieces,
+                (sx * k, sy * k, v.tile, v.tile),
+                (tx + 2.0, ty + 2.0, PROMO_TILE - 4.0, PROMO_TILE - 4.0),
+                None,
+            );
+            let lw = txt.width("b11", letter);
+            txt.draw(
+                cv,
+                "b11",
+                letter,
+                tx + (PROMO_TILE - lw) / 2.0,
+                ty + PROMO_TILE + 20.0,
+                th.muted,
+            );
+        }
+    }
+
     // Game over: banner across the board
     if let Some(msg) = game_over(&g.pos, g.player) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
@@ -354,5 +435,19 @@ mod tests {
             cv.save_png(std::path::Path::new(&format!("/tmp/look-{id}.png")), None)
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn each_piece_in_the_promotion_box_is_picked_by_where_you_point() {
+        let (ox, oy) = promo_origin();
+        for (i, (role, _)) in PROMO_ROLES.iter().enumerate() {
+            let x = ox + PROMO_PAD + i as f32 * (PROMO_TILE + PROMO_GAP) + PROMO_TILE / 2.0;
+            assert_eq!(promotion_at(x, oy + 58.0 + PROMO_TILE / 2.0), Some(*role));
+        }
+        // between tiles, above them, and outside the box: nothing
+        let gap_x = ox + PROMO_PAD + PROMO_TILE + PROMO_GAP / 2.0;
+        assert_eq!(promotion_at(gap_x, oy + 90.0), None);
+        assert_eq!(promotion_at(ox + 40.0, oy + 10.0), None);
+        assert_eq!(promotion_at(5.0, 5.0), None);
     }
 }

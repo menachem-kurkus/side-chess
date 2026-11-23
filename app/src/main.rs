@@ -22,16 +22,16 @@ mod rails;
 mod text;
 
 use canvas::{Canvas, Img};
-use draw::{square_at, View, H, SQ, W};
+use draw::{promotion_at, square_at, View, H, SQ, W};
 use game::{
-    check_opponent_move, game_over, legal_to, live_dir, pick_square, sq, write_state, Game,
+    check_opponent_move, game_over, live_dir, pick_square, sq, write_state, Game, MoveStart,
 };
 use pack::{
     load_look_for, load_pack, piece_sets, save_pieces, saved_pack, saved_pieces, Theme, PACKS,
 };
 use present::{Presenter, Screen};
 use rails::{Hit, Mode, Panel, Rails, LEN, TOP};
-use shakmaty::{fen::Fen, Chess, Color as Side, Position};
+use shakmaty::{fen::Fen, Chess, Color as Side, Position, Role};
 use std::{
     fs,
     rc::Rc,
@@ -366,6 +366,16 @@ impl App {
     }
 
     fn click(&mut self) {
+        if self.g.promotion.is_some() {
+            // the box asking which piece the pawn becomes: pick one, or click away to cancel
+            match promotion_at(self.mouse.0, self.mouse.1) {
+                Some(role) => {
+                    self.g.promote(role);
+                }
+                None => self.g.cancel_promotion(),
+            }
+            return;
+        }
         if !self.my_turn() {
             return;
         }
@@ -374,8 +384,9 @@ impl App {
             return;
         };
         let g = &mut self.g;
-        if let Some(m) = g.selected.and_then(|from| legal_to(&g.pos, from, clicked)) {
-            g.play(&m);
+        let started = g.selected.map(|from| g.try_move(from, clicked));
+        if matches!(started, Some(MoveStart::Played | MoveStart::NeedPromotion)) {
+            // played, or waiting for the piece to be picked
         } else if g.pos.board().piece_at(clicked).map(|p| p.color) == Some(g.player) {
             g.target = None;
             g.selected = if g.selected == Some(clicked) {
@@ -390,14 +401,33 @@ impl App {
     }
 
     fn key(&mut self, key: &Key, el: &ActiveEventLoop) {
+        // While the box asks which piece a pawn becomes, Q R B N pick, Esc cancels
+        if self.g.promotion.is_some() && !self.mods.super_key() && !self.mods.control_key() {
+            match key {
+                Key::Character(s) => {
+                    let role = match s.chars().next().map(|c| c.to_ascii_lowercase()) {
+                        Some('q') => Some(Role::Queen),
+                        Some('r') => Some(Role::Rook),
+                        Some('b') => Some(Role::Bishop),
+                        Some('n') => Some(Role::Knight),
+                        _ => None,
+                    };
+                    if let Some(role) = role {
+                        self.g.promote(role);
+                    }
+                }
+                Key::Named(NamedKey::Escape) => self.g.cancel_promotion(),
+                _ => {}
+            }
+            self.dirty = true;
+            return;
+        }
         match key {
             Key::Named(NamedKey::Enter) => {
                 if let (true, Some(from), Some(to)) =
                     (self.my_turn(), self.g.selected, self.g.target)
                 {
-                    if let Some(m) = legal_to(&self.g.pos, from, to) {
-                        self.g.play(&m);
-                    }
+                    self.g.try_move(from, to);
                 }
             }
             Key::Named(NamedKey::Escape) => {
