@@ -25,6 +25,7 @@ pub struct Game {
     pub saved: Option<(PathBuf, usize)>, // the file this game was saved to, and how many moves it had then
     pub hint: String, // shown in the window only, never in state.txt (a non-empty `note:` there makes the AI think its move was refused)
     pub two: bool, // two people at one screen: no AI, both sides moved by clicking, `player` is white
+    pub engine: Option<u32>, // Stockfish is the opponent, held to this Elo (no AI session is asked)
 }
 
 impl Game {
@@ -49,6 +50,27 @@ impl Game {
             saved: None,
             hint: String::new(),
             two: false,
+            engine: None,
+        }
+    }
+
+    /// A new game against Stockfish at `elo`, the person playing `player`.
+    pub fn new_vs_engine(player: Side, elo: u32) -> Self {
+        Game {
+            engine: Some(elo),
+            ..Game::new_as(player)
+        }
+    }
+
+    /// A fresh game of the same kind as this one: the same mode, the same side, the same
+    /// Stockfish strength.
+    pub fn fresh(&self) -> Game {
+        if self.two {
+            Game::new_two()
+        } else if let Some(elo) = self.engine {
+            Game::new_vs_engine(self.player, elo)
+        } else {
+            Game::new_as(self.player)
         }
     }
 
@@ -74,7 +96,11 @@ impl Game {
     /// The result in words once the game is over (None while it goes on).
     pub fn over(&self) -> Option<String> {
         if !self.two {
-            return game_over(&self.pos, self.player);
+            let over = game_over(&self.pos, self.player);
+            return match self.engine {
+                Some(_) => over.map(|s| s.replace("AI wins", "Stockfish wins")),
+                None => over,
+            };
         }
         if self.pos.is_checkmate() {
             Some(match self.pos.turn() {
@@ -103,7 +129,9 @@ impl Game {
         if in_progress {
             self.hint = "Game in progress. Start a new game first, then swap sides.".into();
         } else {
+            let engine = self.engine;
             *self = Game::new_as(self.player.other());
+            self.engine = engine; // the same opponent, on the other side
             write_state(self);
         }
     }
@@ -298,6 +326,15 @@ pub fn turn_text(g: &Game) -> String {
     let pos = &g.pos;
     match g.over() {
         Some(s) => format!("game over: {s}"),
+        // Stockfish is not an AI session: nothing here may wake one, so it is always "(player)"
+        None if g.engine.is_some() => format!(
+            "{} (player) vs Stockfish",
+            if pos.turn() == Side::White {
+                "white"
+            } else {
+                "black"
+            }
+        ),
         None => format!(
             "{} ({})",
             if pos.turn() == Side::White {
@@ -423,8 +460,8 @@ fn move_note(g: &mut Game, note: String) {
 }
 
 pub fn check_opponent_move(g: &mut Game) {
-    if g.two {
-        return; // two people at one screen: no AI to listen to
+    if g.two || g.engine.is_some() {
+        return; // two people at one screen, or Stockfish: no AI session to listen to
     }
     let dir = live_dir();
     // Codex writes the shared name; the Claude-specific name remains supported
@@ -872,6 +909,44 @@ mod in_person_tests {
         ));
         // the AI watch only wakes for "(AI)", so an in-person game never wakes it
         assert!(!state_text(&g).contains("(AI)"));
+    }
+
+    #[test]
+    fn against_stockfish_it_is_never_an_ai_sessions_turn_and_the_result_names_stockfish() {
+        home();
+        let mut g = Game::new_vs_engine(Side::White, 1500);
+        assert_eq!(turn_text(&g), "white (player) vs Stockfish");
+        play(&mut g, "f2", "f3");
+        // black's turn is Stockfish's, but the state file never says "(AI)": a watching
+        // assistant would take that for its own turn
+        assert_eq!(turn_text(&g), "black (player) vs Stockfish");
+        assert!(!state_text(&g).contains("(AI)"));
+        assert!(!g.person_to_move(), "the person waits for the engine");
+        for m in [("e7", "e5"), ("g2", "g4"), ("d8", "h4")] {
+            let (f, t) = (m.0.parse().unwrap(), m.1.parse().unwrap());
+            let mv = legal_to(&g.pos, f, t).unwrap();
+            g.play(&mv);
+        }
+        assert_eq!(g.over().as_deref(), Some("Checkmate. Stockfish wins."));
+        let pgn = crate::save::pgn_text(&g, 0);
+        assert!(pgn.contains("[Black \"Stockfish 1500\"]"), "{pgn}");
+        let parsed = crate::replay::parse_pgn(&pgn).unwrap();
+        assert_eq!(parsed.engine_elo(), Some(1500));
+        assert!(parsed.vs_engine() && !parsed.two());
+    }
+
+    #[test]
+    fn a_fresh_game_and_swapping_sides_keep_the_opponent() {
+        home();
+        let mut g = Game::new_vs_engine(Side::White, 2200);
+        assert_eq!(
+            (g.fresh().engine, g.fresh().player),
+            (Some(2200), Side::White)
+        );
+        g.swap_sides(); // nothing played yet: allowed
+        assert_eq!((g.engine, g.player), (Some(2200), Side::Black));
+        assert_eq!(Game::new_two().fresh().two, true);
+        assert_eq!(Game::new_as(Side::Black).fresh().engine, None);
     }
 
     #[test]

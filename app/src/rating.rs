@@ -191,8 +191,9 @@ fn record_game_in(pgn: &Path, file: &Path) {
     let Ok(p) = crate::replay::parse_pgn(&text) else {
         return;
     };
-    if p.two() {
-        return; // two people played it: the AI has nothing to be rated on
+    if p.two() || p.vs_engine() {
+        // two people played it, or Stockfish did: the ratings are yours against the AI sessions
+        return;
     }
     let me = p.player();
     let score = match (p.result.as_str(), me) {
@@ -280,6 +281,24 @@ mod tests {
         let rs = Ratings::from_text(&fs::read_to_string(&file).unwrap());
         assert_eq!(rs.counted, ["g1"]);
         assert!(rs.you.rating > 1500.0, "the person (black) won");
+        // Stockfish played it: the ratings are yours against the AI sessions
+        let sf = dir.join("g4.pgn");
+        fs::write(
+            &sf,
+            "[White \"You\"]
+[Black \"Stockfish 1500\"]
+[Result \"1-0\"]
+
+1. e4 e5 1-0
+",
+        )
+        .unwrap();
+        record_game_in(&sf, &file);
+        assert_eq!(
+            Ratings::from_text(&fs::read_to_string(&file).unwrap()).counted,
+            ["g1"],
+            "a game against Stockfish is not counted"
+        );
         // two people at one screen: nobody to rate the AI against
         let two = dir.join("g3.pgn");
         fs::write(

@@ -179,7 +179,15 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             },
         ),
         None => (
-            format!("AI is thinking{}", ".".repeat(v.thinking_dots)),
+            format!(
+                "{} is thinking{}",
+                if g.engine.is_some() {
+                    "Stockfish"
+                } else {
+                    "AI"
+                },
+                ".".repeat(v.thinking_dots)
+            ),
             band0.mix(on_band, 0.72),
         ),
     };
@@ -213,6 +221,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
                 (true, Side::White) => "White",
                 (true, Side::Black) => "Black",
                 (false, _) if mine => "You",
+                _ if g.engine.is_some() => "Stockfish",
                 _ => "AI",
             };
             let line = format!(

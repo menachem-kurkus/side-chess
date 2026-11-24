@@ -28,6 +28,19 @@ impl Parsed {
         }
     }
 
+    /// The Elo Stockfish was held to, for a game played against it (it is saved as the
+    /// opponent's name, "Stockfish 1500").
+    pub fn engine_elo(&self) -> Option<u32> {
+        [&self.white, &self.black]
+            .into_iter()
+            .find_map(|n| n.strip_prefix("Stockfish ")?.trim().parse().ok())
+    }
+
+    /// A game played against Stockfish, whatever the strength was.
+    pub fn vs_engine(&self) -> bool {
+        self.white.starts_with("Stockfish") || self.black.starts_with("Stockfish")
+    }
+
     /// A game two people played at one screen (in person): there is no AI in it, so it
     /// has no "You", is never rated, and is shown by colour.
     pub fn two(&self) -> bool {
@@ -157,6 +170,7 @@ impl Run {
         let mut run = Run {
             view: Game {
                 two: p.two(),
+                engine: p.engine_elo(),
                 ..Game::new_as(p.player())
             },
             positions,

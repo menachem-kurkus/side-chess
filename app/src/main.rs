@@ -35,15 +35,17 @@ mod threats;
 
 use canvas::{Canvas, Color, Img};
 use draw::{menu_button_at, promotion_at, square_at, View, H, SQ, W};
-use game::{check_opponent_move, live_dir, pick_square, sq, write_state, Game, MoveStart};
-use home::{Info, Item, KeysHit, PacksHit, Page};
+use game::{
+    check_opponent_move, live_dir, parse_move, pick_square, sq, write_state, Game, MoveStart,
+};
+use home::{Choice, EngineHit, Info, Item, KeysHit, PacksHit, Page};
 use keys::{Action, Keymap, ACTIONS};
 use pack::{
     load_look_for, load_pack, piece_sets, save_pieces, saved_pack, saved_pieces, Theme, PACKS,
 };
 use present::{Presenter, Screen};
 use rails::{Hit, Mode, Panel, Rails, LEN, TOP};
-use shakmaty::{fen::Fen, Chess, Color as Side, Position, Role};
+use shakmaty::{fen::Fen, Chess, Color as Side, EnPassantMode, Position, Role};
 use std::{
     fs,
     rc::Rc,
@@ -119,6 +121,12 @@ struct App {
     live_at: Instant,          // when the home screen's live numbers were last read
     replay_from_home: bool, // the replay list was opened from the home screen: Esc goes back to it
     ai_side: Side,          // the side the person last played against the AI
+    choice: Choice,         // the strength and side picked for a game against Stockfish
+    typing: Option<String>, // digits being typed into the strength
+    engine_hover: Option<EngineHit>,
+    sf: Option<(u32, engine::Player)>, // Stockfish playing this game (at this Elo), if it is on
+    sf_waiting: bool,                  // a move has been asked of it and has not come back
+    sf_broken: bool,                   // it stopped: do not start it again for this game
 }
 
 impl App {
@@ -133,6 +141,18 @@ impl App {
                 .map(|f| f.into_position::<Chess>(shakmaty::CastlingMode::Standard))
             {
                 g.pos = p;
+            }
+        }
+        // testing: CHESS_VS_STOCKFISH=1500 (or 1500,black) starts a game against Stockfish
+        if let Ok(v) = std::env::var("CHESS_VS_STOCKFISH") {
+            let mut it = v.split(',');
+            if let Some(elo) = it.next().and_then(|e| e.trim().parse().ok()) {
+                let side = if it.next() == Some("black") {
+                    Side::Black
+                } else {
+                    Side::White
+                };
+                g = Game::new_vs_engine(side, engine::clamp_elo(elo));
             }
         }
         // testing: CHESS_SELECT=e2 starts with that piece selected (to see its move dots)
@@ -160,6 +180,7 @@ impl App {
             Ok("game") => Page::Game,
             Ok("keys") => Page::Keys,
             Ok("packs") => Page::Packs,
+            Ok("engine") => Page::Engine,
             _ => Page::Home,
         };
         App {
@@ -218,11 +239,120 @@ impl App {
             live_at: Instant::now(),
             replay_from_home: false,
             ai_side: Side::White,
+            choice: Choice::load(),
+            typing: None,
+            engine_hover: None,
+            sf: None,
+            sf_waiting: false,
+            sf_broken: false,
+        }
+    }
+
+    /// Is a game against Stockfish in progress (begun, not over)?
+    fn engine_game_on(&self) -> bool {
+        self.g.engine.is_some() && !self.g.sans.is_empty() && self.g.over().is_none()
+    }
+
+    /// Start a new game against Stockfish with the strength and side picked.
+    fn start_engine_game(&mut self) {
+        if engine::find_engine().is_none() {
+            self.info.stockfish = false;
+            return;
+        }
+        if !self.g.two && self.g.engine.is_none() {
+            self.autosave();
+            self.ai_side = self.g.player;
+        }
+        save::save(&mut self.g);
+        let side = if self.choice.white {
+            Side::White
+        } else {
+            Side::Black
+        };
+        self.g = Game::new_vs_engine(side, self.choice.elo);
+        let _ = fs::remove_file(live_dir().join("claude_move.txt"));
+        let _ = fs::remove_file(live_dir().join("opponent_move.txt"));
+        self.sf = None;
+        self.sf_waiting = false;
+        self.sf_broken = false;
+        write_state(&self.g);
+        self.page = Page::Game;
+    }
+
+    /// Keep Stockfish's side of the game going: start it when it is its turn, ask it for
+    /// a move, and play the answer. It runs only while a game against it is on.
+    fn drive_engine(&mut self) {
+        let Some(elo) = self.g.engine else {
+            self.sf = None;
+            return;
+        };
+        if self.g.over().is_some() {
+            self.sf = None; // the game has ended: its process is stopped
+            self.sf_waiting = false;
+            return;
+        }
+        let engines_turn = self.g.pos.turn() != self.g.player;
+        let fen = Fen::from_position(self.g.pos.clone(), EnPassantMode::Legal).to_string();
+        if self.sf.as_ref().is_some_and(|(e, _)| *e != elo) {
+            self.sf = None;
+            self.sf_waiting = false;
+        }
+        // an answer (or news that it stopped)
+        let mut stopped = false;
+        if let Some((_, p)) = &self.sf {
+            loop {
+                match p.answers.try_recv() {
+                    Ok((asked, mv)) => {
+                        self.sf_waiting = false;
+                        // an answer to a position that has since changed (take back, new game)
+                        // is dropped; the next question is for the position now
+                        if asked == fen && engines_turn {
+                            if let Some(m) = parse_move(&self.g.pos, &mv) {
+                                self.g.play(&m);
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        stopped = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if stopped {
+            self.sf = None;
+            self.sf_waiting = false;
+            self.sf_broken = true;
+            self.g.hint = "Stockfish stopped. Start a new game to try again.".into();
+            self.dirty = true;
+            return;
+        }
+        if self.g.over().is_some() || self.sf_broken {
+            return;
+        }
+        let engines_turn = self.g.pos.turn() != self.g.player;
+        if engines_turn && !self.sf_waiting {
+            if self.sf.is_none() {
+                let Some(path) = engine::find_engine() else {
+                    self.sf_broken = true;
+                    self.g.hint = "Stockfish isn't installed any more. See the README.".into();
+                    self.dirty = true;
+                    return;
+                };
+                self.sf = Some((elo, engine::Player::start(path, elo)));
+            }
+            if let Some((_, p)) = &self.sf {
+                let fen = Fen::from_position(self.g.pos.clone(), EnPassantMode::Legal).to_string();
+                p.ask(fen);
+                self.sf_waiting = true;
+            }
         }
     }
 
     /// The small print under each thing to do on the home screen.
-    fn home_subs(&self) -> [String; 5] {
+    fn home_subs(&self) -> [String; 6] {
         let moves = self.g.sans.len().div_ceil(2);
         let ai_playing = !self.g.two && !self.g.sans.is_empty() && self.g.over().is_none();
         let (me, other) = if self.g.player == Side::White {
@@ -238,6 +368,16 @@ impl App {
             "Your last game is over: open the board for a new one".to_string()
         } else {
             format!("You play {me}; Claude or Codex plays {other}")
+        };
+        let stockfish = if !self.info.stockfish && !self.engine_game_on() {
+            "Not installed yet: the README says where to put it".to_string()
+        } else if self.engine_game_on() {
+            format!(
+                "Playing Stockfish {}, move {moves}. Pick a strength or carry on",
+                self.g.engine.unwrap_or(0)
+            )
+        } else {
+            format!("You choose how strong: now {}", self.choice.elo)
         };
         let two = if self.g.two && self.g.over().is_none() && !self.g.sans.is_empty() {
             format!("Continue, move {moves}")
@@ -267,7 +407,7 @@ impl App {
             self.pack_names.get(self.pack).map_or("", |s| s.as_str()),
             self.pack_names.len()
         );
-        [ai, two, replays, keys, packs]
+        [ai, stockfish, two, replays, keys, packs]
     }
 
     /// Go to the home screen, reading the score and the rest again.
@@ -298,11 +438,19 @@ impl App {
                 }
                 self.page = Page::Game;
             }
+            Item::Stockfish => {
+                // is it installed? (it may have been put there since the app opened)
+                self.info.stockfish = engine::find_engine().is_some();
+                self.typing = None;
+                self.page = Page::Engine;
+            }
             Item::InPerson => {
                 if !self.g.two {
                     self.autosave();
                     save::save(&mut self.g);
-                    self.ai_side = self.g.player;
+                    if self.g.engine.is_none() {
+                        self.ai_side = self.g.player;
+                    }
                     self.g = Game::new_two();
                     write_state(&self.g);
                 }
@@ -362,6 +510,35 @@ impl App {
                     None => {}
                 }
             }
+            Page::Engine => {
+                let hit = home::engine_hit(x, y, self.engine_game_on());
+                // a click anywhere but the number settles what was being typed
+                if hit != Some(EngineHit::Number) {
+                    if let Some(t) = self.typing.take() {
+                        self.choice.set_typed(&t);
+                        self.choice.save();
+                    }
+                }
+                match hit {
+                    Some(EngineHit::Back) => self.go_home(),
+                    Some(EngineHit::Minus) => {
+                        self.choice.step(-100);
+                        self.choice.save();
+                    }
+                    Some(EngineHit::Plus) => {
+                        self.choice.step(100);
+                        self.choice.save();
+                    }
+                    Some(EngineHit::Number) => self.typing = Some(String::new()),
+                    Some(EngineHit::White) | Some(EngineHit::Black) => {
+                        self.choice.white = hit == Some(EngineHit::White);
+                        self.choice.save();
+                    }
+                    Some(EngineHit::Start) => self.start_engine_game(),
+                    Some(EngineHit::Continue) => self.page = Page::Game,
+                    None => {}
+                }
+            }
             Page::Game => {}
         }
         self.dirty = true;
@@ -391,6 +568,13 @@ impl App {
                     home::packs_hit(x, y, self.pack_names.len(), self.piece_names.len() + 1);
                 if hover != self.packs_hover {
                     self.packs_hover = hover;
+                    self.dirty = true;
+                }
+            }
+            Page::Engine => {
+                let hover = home::engine_hit(x, y, self.engine_game_on());
+                if hover != self.engine_hover {
+                    self.engine_hover = hover;
                     self.dirty = true;
                 }
             }
@@ -448,6 +632,40 @@ impl App {
                     self.go_home();
                 }
             }
+            Page::Engine => match (key, self.typing.is_some()) {
+                (Key::Named(NamedKey::Escape), true) => self.typing = None,
+                (Key::Named(NamedKey::Escape), false) => self.go_home(),
+                (Key::Named(NamedKey::Enter), true) => {
+                    if let Some(t) = self.typing.take() {
+                        self.choice.set_typed(&t);
+                        self.choice.save();
+                    }
+                }
+                (Key::Named(NamedKey::Backspace), true) => {
+                    if let Some(t) = &mut self.typing {
+                        t.pop();
+                    }
+                }
+                (Key::Character(s), true) if !quit => {
+                    if let Some(t) = &mut self.typing {
+                        for c in s.chars().filter(char::is_ascii_digit) {
+                            if t.len() < 4 {
+                                t.push(c);
+                            }
+                        }
+                    }
+                }
+                (Key::Named(NamedKey::Enter), false) => self.start_engine_game(),
+                (Key::Named(NamedKey::ArrowLeft), false) => {
+                    self.choice.step(-100);
+                    self.choice.save();
+                }
+                (Key::Named(NamedKey::ArrowRight), false) => {
+                    self.choice.step(100);
+                    self.choice.save();
+                }
+                _ => {}
+            },
             Page::Game => {}
         }
         self.dirty = true;
@@ -458,11 +676,9 @@ impl App {
         match a {
             Action::New => {
                 save::save(&mut self.g);
-                self.g = if self.g.two {
-                    Game::new_two()
-                } else {
-                    Game::new_as(self.g.player)
-                };
+                self.g = self.g.fresh();
+                self.sf_waiting = false;
+                self.sf_broken = false;
                 write_state(&self.g);
             }
             // swap sides: only between games (refused mid-game: press New game first)
@@ -963,6 +1179,16 @@ impl App {
         let (pack, pieces_row, focus) = (self.pack, self.pieces_row(), self.home_focus);
         let (keys_wait, keys_msg) = (self.keys_wait, self.keys_msg.as_str());
         let (keys_hover, packs_hover) = (self.keys_hover, self.packs_hover);
+        let (choice, engine_hover) = (self.choice, self.engine_hover);
+        let typing = self.typing.as_deref();
+        let found = self.info.stockfish;
+        let resume = self.engine_game_on().then(|| {
+            format!(
+                "Stockfish {}, move {}. A new game ends it (it is kept in your saved games).",
+                self.g.engine.unwrap_or(0),
+                self.g.sans.len().div_ceil(2)
+            )
+        });
         let shot = &mut self.shot;
         let drawn = Instant::now();
         // The presenter hands the closure the pixels to draw into: the window's own
@@ -985,6 +1211,16 @@ impl App {
                     pack,
                     pieces_row,
                     packs_hover,
+                ),
+                Page::Engine => home::draw_engine(
+                    &mut cv,
+                    th,
+                    txt,
+                    choice,
+                    typing,
+                    found,
+                    resume,
+                    engine_hover,
                 ),
             }
             if *shot {
@@ -1174,6 +1410,7 @@ impl ApplicationHandler for App {
             self.info.refresh();
             self.dirty = true;
         }
+        self.drive_engine();
         let shot_req = live_dir().join("shot");
         if shot_req.exists() {
             let _ = fs::remove_file(&shot_req);
@@ -1198,7 +1435,13 @@ impl ApplicationHandler for App {
             self.dirty = false;
             self.request_redraws();
         }
-        el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + POLL));
+        // while Stockfish is thinking, look often so its move appears the moment it is ready
+        let wait = if self.sf_waiting {
+            Duration::from_millis(40)
+        } else {
+            POLL
+        };
+        el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
 }
 
