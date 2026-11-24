@@ -145,6 +145,13 @@ impl Search {
                             self.cp = Some((n * sign).clamp(-CAP, CAP));
                             self.mate = None;
                         }
+                        // "mate 0" is a position that is already checkmate: the side to move
+                        // has lost, so the score is for the other side (n * sign alone is 0
+                        // either way and would always read as a win for black)
+                        (Some(&"mate"), Some(0)) => {
+                            self.cp = Some(if white_to_move { -CAP } else { CAP });
+                            self.mate = Some(0);
+                        }
                         (Some(&"mate"), Some(n)) => {
                             self.cp = Some(if n * sign > 0 { CAP } else { -CAP });
                             self.mate = Some(n * sign);
@@ -301,6 +308,39 @@ mod tests {
         s.line("info depth 9 score mate -2 pv a1a2", true);
         let r = s.line("bestmove a1a2", true).unwrap();
         assert_eq!((r.cp, r.mate), (-CAP, Some(-2)));
+    }
+
+    #[test]
+    fn a_checkmate_position_scores_for_the_side_that_mated() {
+        // Stockfish says "mate 0" for a position that is already checkmate. White's
+        // mating move leaves black to move and mated: that is +CAP for white, so the
+        // mating move costs nothing (it was once marked a 20 pawn blunder).
+        let mut s = Search::default();
+        s.line("info depth 0 score mate 0", false);
+        let after = s.line("bestmove (none)", false).unwrap();
+        assert_eq!(
+            (after.cp, after.mate, after.text()),
+            (CAP, Some(0), "#0".to_string())
+        );
+        assert_eq!(loss(&e(CAP), &after, Side::White), 0);
+        // and the other way round: white to move and mated is a win for black
+        s.line("info depth 0 score mate 0", true);
+        let after = s.line("bestmove (none)", true).unwrap();
+        assert_eq!(after.cp, -CAP);
+        assert_eq!(loss(&e(-CAP), &after, Side::Black), 0);
+    }
+
+    #[test]
+    #[ignore] // needs a real Stockfish: SIDE_CHESS_ENGINE=<path> cargo test -- --ignored
+    fn real_stockfish_scores_a_checkmate_for_the_side_that_mated() {
+        let path = find_engine().expect("no Stockfish found");
+        // the end of a real game: white has just played Qa2#, black to move
+        let engine = Engine::start(path, vec!["8/8/3N4/p7/k7/3N3P/Q7/7K b - - 3 42".into()]);
+        let (_, e) = engine
+            .results
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("an answer");
+        assert_eq!((e.cp, e.text()), (CAP, "#0".to_string()));
     }
 
     #[test]

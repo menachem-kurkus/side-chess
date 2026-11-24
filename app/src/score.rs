@@ -76,11 +76,17 @@ fn score_path(pgn: &Path) -> std::path::PathBuf {
 
 pub fn save(pgn: &Path, s: &Score) {
     let text = format!(
-        "white_moves={}\nwhite_acpl={:.1}\nwhite_accuracy={:.1}\nblack_moves={}\nblack_acpl={:.1}\nblack_accuracy={:.1}\n",
+        "version={VERSION}
+white_moves={}\nwhite_acpl={:.1}\nwhite_accuracy={:.1}\nblack_moves={}\nblack_acpl={:.1}\nblack_accuracy={:.1}\n",
         s.white.moves, s.white.acpl, s.white.accuracy, s.black.moves, s.black.acpl, s.black.accuracy
     );
     let _ = fs::write(score_path(pgn), text);
 }
+
+/// Bumped when the way a score is worked out changes, so scores kept by an older app are
+/// worked out again when the replay is next opened. 2: a checkmating move is no longer
+/// counted as a blunder.
+const VERSION: f32 = 2.0;
 
 pub fn load(pgn: &Path) -> Option<Score> {
     let text = fs::read_to_string(score_path(pgn)).ok()?;
@@ -88,6 +94,9 @@ pub fn load(pgn: &Path) -> Option<Score> {
         text.lines()
             .find_map(|l| l.strip_prefix(key)?.strip_prefix('=')?.trim().parse().ok())
     };
+    if get("version")? != VERSION {
+        return None; // kept by an older app
+    }
     Some(Score {
         white: SideScore {
             moves: get("white_moves")? as usize,
@@ -148,6 +157,19 @@ mod tests {
         assert_eq!(back.white.moves, 3);
         assert!((back.black.accuracy - s.black.accuracy).abs() < 0.06);
         assert_eq!(load(&dir.join("none.pgn")), None);
+        // a score file from before the version was kept is worked out again
+        fs::write(
+            dir.join("old.score"),
+            "white_moves=1
+white_acpl=0.0
+white_accuracy=100.0
+black_moves=1
+black_acpl=0.0
+black_accuracy=100.0
+",
+        )
+        .unwrap();
+        assert_eq!(load(&dir.join("old.pgn")), None);
         let _ = fs::remove_dir_all(&dir);
     }
 }
