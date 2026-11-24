@@ -11,6 +11,10 @@ The user plays white in the Side Chess window by default, and you play black whe
 
 When a game starts, read `~/.side-chess/app_version.txt` (written by the install script). If it is missing or older than 0.2.2, the installed app is out of date: it says `black (Claude)` instead of `black (AI)` and does not read `opponent_move.txt`. Tell the user, and offer to rebuild it with the repository's `app/install.sh` (macOS or Linux) or `powershell -ExecutionPolicy Bypass -File app\install.ps1` (Windows) if the repository is available; quit Side Chess on a Mac first. On Linux the app needs libxkbcommon-x11 (libxkbcommon on Wayland); if the install script or the app says it is missing, give the user the command it prints, such as `sudo apt install libxkbcommon-x11-0 fonts-liberation fonts-dejavu-core`. Until it is updated, write your moves to `claude_move.txt` instead of `opponent_move.txt`, since every version of the app reads that file.
 
+## The window
+
+The window opens on a home screen: the person clicks Play against AI (or presses Enter) to reach the board. Play in person is two people at one screen: `turn:` says `(player)` for both sides, so it is never your move.
+
 ## Take a turn
 
 1. Read the full `state.txt` whenever the user starts a game or asks for your move. Use the current `fen:`, move list, board, and `legal:` list; never rely on a position from an earlier turn.

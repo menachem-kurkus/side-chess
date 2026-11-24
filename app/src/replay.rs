@@ -11,6 +11,7 @@ use std::{fs, path::PathBuf, str::FromStr};
 
 /// A game read from PGN text.
 pub struct Parsed {
+    pub white: String,
     pub black: String,
     pub result: String,
     pub start: Chess,
@@ -26,13 +27,23 @@ impl Parsed {
             Side::White
         }
     }
+
+    /// A game two people played at one screen (in person): there is no AI in it, so it
+    /// has no "You", is never rated, and is shown by colour.
+    pub fn two(&self) -> bool {
+        self.white == IN_PERSON_WHITE && self.black == IN_PERSON_BLACK
+    }
 }
+
+/// The names an in-person game is saved under.
+pub const IN_PERSON_WHITE: &str = "Player 1";
+pub const IN_PERSON_BLACK: &str = "Player 2";
 
 /// Read PGN text: the headers we use, and the main line of moves. Comments,
 /// variations, numeric annotations and move numbers are skipped. An illegal or
 /// unreadable move is an error naming it (a half game would mislead).
 pub fn parse_pgn(text: &str) -> Result<Parsed, String> {
-    let (mut black, mut result) = ("?".to_string(), "*".to_string());
+    let (mut white, mut black, mut result) = ("?".to_string(), "?".to_string(), "*".to_string());
     let mut start = Chess::default();
     let mut body = String::new();
     for line in text.lines() {
@@ -41,6 +52,7 @@ pub fn parse_pgn(text: &str) -> Result<Parsed, String> {
             let (name, rest) = tag.split_once(' ').unwrap_or((tag, ""));
             let value = rest.trim().trim_matches('"').to_string();
             match name {
+                "White" => white = value,
                 "Black" => black = value,
                 "Result" => result = value,
                 "FEN" => {
@@ -107,6 +119,7 @@ pub fn parse_pgn(text: &str) -> Result<Parsed, String> {
         moves.push(m);
     }
     Ok(Parsed {
+        white,
         black,
         result,
         start,
@@ -142,7 +155,10 @@ impl Run {
             positions.push(pos.clone());
         }
         let mut run = Run {
-            view: Game::new_as(p.player()),
+            view: Game {
+                two: p.two(),
+                ..Game::new_as(p.player())
+            },
             positions,
             lasts,
             sans,
@@ -288,6 +304,8 @@ fn entry(path: PathBuf) -> Option<Entry> {
     };
     let me = p.player();
     let ended = match (p.result.as_str(), me) {
+        ("1-0", _) if p.two() => "White won",
+        ("0-1", _) if p.two() => "Black won",
         ("1-0", Side::White) | ("0-1", Side::Black) => "Won",
         ("1-0", _) | ("0-1", _) => "Lost",
         ("1/2-1/2", _) => "Draw",
@@ -297,7 +315,14 @@ fn entry(path: PathBuf) -> Option<Entry> {
         path,
         cols: [
             when,
-            if me == Side::White { "White" } else { "Black" }.to_string(),
+            if p.two() {
+                "In person"
+            } else if me == Side::White {
+                "White"
+            } else {
+                "Black"
+            }
+            .to_string(),
             ended.to_string(),
             {
                 let n = p.moves.len().div_ceil(2);

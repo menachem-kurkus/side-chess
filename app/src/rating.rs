@@ -191,6 +191,9 @@ fn record_game_in(pgn: &Path, file: &Path) {
     let Ok(p) = crate::replay::parse_pgn(&text) else {
         return;
     };
+    if p.two() {
+        return; // two people played it: the AI has nothing to be rated on
+    }
     let me = p.player();
     let score = match (p.result.as_str(), me) {
         ("1-0", shakmaty::Color::White) | ("0-1", shakmaty::Color::Black) => 1.0,
@@ -277,6 +280,24 @@ mod tests {
         let rs = Ratings::from_text(&fs::read_to_string(&file).unwrap());
         assert_eq!(rs.counted, ["g1"]);
         assert!(rs.you.rating > 1500.0, "the person (black) won");
+        // two people at one screen: nobody to rate the AI against
+        let two = dir.join("g3.pgn");
+        fs::write(
+            &two,
+            "[White \"Player 1\"]
+[Black \"Player 2\"]
+[Result \"1-0\"]
+
+1. e4 e5 1-0
+",
+        )
+        .unwrap();
+        record_game_in(&two, &file);
+        assert_eq!(
+            Ratings::from_text(&fs::read_to_string(&file).unwrap()).counted,
+            ["g1"],
+            "an in-person game is not counted"
+        );
         // an unfinished game is not rated
         let g2 = dir.join("g2.pgn");
         fs::write(&g2, "[White \"You\"]\n[Black \"AI\"]\n\n1. e4 e5 *\n").unwrap();

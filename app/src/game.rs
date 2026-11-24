@@ -24,6 +24,7 @@ pub struct Game {
     pub rated: bool, // the finished game's result has been counted in the ratings
     pub saved: Option<(PathBuf, usize)>, // the file this game was saved to, and how many moves it had then
     pub hint: String, // shown in the window only, never in state.txt (a non-empty `note:` there makes the AI think its move was refused)
+    pub two: bool, // two people at one screen: no AI, both sides moved by clicking, `player` is white
 }
 
 impl Game {
@@ -47,16 +48,60 @@ impl Game {
             rated: false,
             saved: None,
             hint: String::new(),
+            two: false,
         }
+    }
+
+    /// A new game for two people at one screen (in person): the window moves whichever
+    /// side's turn it is, and no AI is asked.
+    pub fn new_two() -> Self {
+        Game {
+            two: true,
+            ..Game::new_as(Side::White)
+        }
+    }
+
+    /// The side whose pieces the person moves now: the chosen side against the AI,
+    /// whoever is to move when two people share the screen.
+    pub fn mover(&self) -> Side {
+        if self.two {
+            self.pos.turn()
+        } else {
+            self.player
+        }
+    }
+
+    /// The result in words once the game is over (None while it goes on).
+    pub fn over(&self) -> Option<String> {
+        if !self.two {
+            return game_over(&self.pos, self.player);
+        }
+        if self.pos.is_checkmate() {
+            Some(match self.pos.turn() {
+                Side::White => "Checkmate. Black wins.".into(),
+                Side::Black => "Checkmate. White wins.".into(),
+            })
+        } else {
+            game_over(&self.pos, self.player)
+        }
+    }
+
+    /// Has the person a move to make: their turn against the AI, or any turn when two share.
+    pub fn person_to_move(&self) -> bool {
+        (self.two || self.pos.turn() == self.player) && self.over().is_none()
     }
 
     /// S swaps sides, but only between games: before the first move, or once the game
     /// is over. In the middle of a game it is refused with a message in the window and
-    /// nothing changes (press N for a new game first).
+    /// nothing changes (start a new game first).
     pub fn swap_sides(&mut self) {
-        let in_progress = !self.sans.is_empty() && game_over(&self.pos, self.player).is_none();
+        if self.two {
+            self.hint = "Swapping sides is for games against the AI.".into();
+            return;
+        }
+        let in_progress = !self.sans.is_empty() && self.over().is_none();
         if in_progress {
-            self.hint = "Game in progress. Press N for a new game, then S to swap sides.".into();
+            self.hint = "Game in progress. Start a new game first, then swap sides.".into();
         } else {
             *self = Game::new_as(self.player.other());
             write_state(self);
@@ -127,7 +172,8 @@ impl Game {
             self.pos = p;
             self.last = l;
             self.sans.pop();
-            if self.pos.turn() == self.player {
+            // two people: take back one move; against the AI: back to the person's turn
+            if self.two || self.pos.turn() == self.player {
                 break;
             }
         }
@@ -179,8 +225,9 @@ pub fn dist(a: Square, b: Square) -> u32 {
 
 // A square typed on the keyboard (letter + number)
 pub fn pick_square(g: &mut Game, s: Square) {
+    let me = g.mover();
     // One of my pieces: select it
-    if g.pos.board().piece_at(s).map(|p| p.color) == Some(g.player) {
+    if g.pos.board().piece_at(s).map(|p| p.color) == Some(me) {
         g.selected = Some(s);
         g.target = None;
         return;
@@ -194,7 +241,7 @@ pub fn pick_square(g: &mut Game, s: Square) {
     }
     // Nothing selected: take my closest piece that can go there and offer it,
     // otherwise just select my closest piece
-    let mine: Vec<Square> = g.pos.board().by_color(g.player).into_iter().collect();
+    let mine: Vec<Square> = g.pos.board().by_color(me).into_iter().collect();
     let can_go = mine
         .iter()
         .copied()
@@ -249,7 +296,7 @@ pub fn move_list(sans: &[String]) -> String {
 /// person or the AI.
 pub fn turn_text(g: &Game) -> String {
     let pos = &g.pos;
-    match game_over(pos, g.player) {
+    match g.over() {
         Some(s) => format!("game over: {s}"),
         None => format!(
             "{} ({})",
@@ -258,7 +305,8 @@ pub fn turn_text(g: &Game) -> String {
             } else {
                 "black"
             },
-            if pos.turn() == g.player {
+            // in person both sides are people: nothing here is the AI's turn
+            if g.two || pos.turn() == g.player {
                 "player"
             } else {
                 "AI"
@@ -375,6 +423,9 @@ fn move_note(g: &mut Game, note: String) {
 }
 
 pub fn check_opponent_move(g: &mut Game) {
+    if g.two {
+        return; // two people at one screen: no AI to listen to
+    }
     let dir = live_dir();
     // Codex writes the shared name; the Claude-specific name remains supported
     // for existing Claude Code installs and older app versions.
@@ -721,10 +772,14 @@ mod tests {
         let before = (g.player, g.sans.clone(), g.pos.clone());
         g.swap_sides();
         assert_eq!((g.player, g.sans.clone(), g.pos.clone()), before);
-        assert!(g.hint.contains("Press N"), "{}", g.hint);
+        assert!(g.hint.contains("Start a new game"), "{}", g.hint);
         // the message is for the window only: state.txt (and its note:) never carries it
         assert!(g.note.is_empty());
-        assert!(!state_text(&g).contains("Press N"), "{}", state_text(&g));
+        assert!(
+            !state_text(&g).contains("Start a new game"),
+            "{}",
+            state_text(&g)
+        );
         assert!(state_text(&g).contains("\nnote: \n"));
         // the next move clears the message
         g.play(&parse_move(&g.pos, "Nf3").unwrap());
@@ -783,5 +838,80 @@ mod tests {
             parse_move(&b.pos, "e1=R").and_then(|m| m.promotion()),
             Some(Role::Rook)
         );
+    }
+}
+
+#[cfg(test)]
+mod in_person_tests {
+    use super::*;
+
+    fn home() {
+        let dir = std::env::temp_dir().join("side-chess-test-home");
+        let _ = fs::create_dir_all(&dir);
+        std::env::set_var("HOME", dir);
+    }
+
+    fn play(g: &mut Game, from: &str, to: &str) {
+        let (f, t): (Square, Square) = (from.parse().unwrap(), to.parse().unwrap());
+        assert_eq!(g.try_move(f, t), MoveStart::Played, "{from}{to}");
+    }
+
+    #[test]
+    fn both_sides_are_moved_from_the_window_and_the_ai_is_never_the_one_to_move() {
+        home();
+        let mut g = Game::new_two();
+        assert!(g.two && g.person_to_move() && g.mover() == Side::White);
+        assert_eq!(turn_text(&g), "white (player)");
+        play(&mut g, "e2", "e4");
+        assert!(g.person_to_move(), "black's turn is a person's too");
+        assert_eq!(g.mover(), Side::Black);
+        assert_eq!(turn_text(&g), "black (player)");
+        assert!(state_text(&g).starts_with(
+            "turn: black (player)
+"
+        ));
+        // the AI watch only wakes for "(AI)", so an in-person game never wakes it
+        assert!(!state_text(&g).contains("(AI)"));
+    }
+
+    #[test]
+    fn typed_squares_pick_the_side_to_move() {
+        home();
+        let mut g = Game::new_two();
+        play(&mut g, "e2", "e4");
+        // black to move: typing e7 selects black's pawn, not an opponent's
+        pick_square(&mut g, "e7".parse().unwrap());
+        assert_eq!(g.selected, Some("e7".parse().unwrap()));
+    }
+
+    #[test]
+    fn take_back_undoes_one_move_and_swap_sides_is_refused() {
+        home();
+        let mut g = Game::new_two();
+        play(&mut g, "e2", "e4");
+        play(&mut g, "e7", "e5");
+        g.undo();
+        assert_eq!(g.sans.len(), 1);
+        assert_eq!(g.pos.turn(), Side::Black);
+        g.swap_sides();
+        assert!(g.two && g.hint.contains("AI"), "{}", g.hint);
+        assert_eq!(g.sans.len(), 1, "nothing changed");
+    }
+
+    #[test]
+    fn the_result_names_the_colour_that_won_and_the_game_is_saved_as_two_players() {
+        home();
+        let mut g = Game::new_two();
+        for (a, b) in [("f2", "f3"), ("e7", "e5"), ("g2", "g4"), ("d8", "h4")] {
+            play(&mut g, a, b);
+        }
+        assert_eq!(g.over().as_deref(), Some("Checkmate. Black wins."));
+        assert_eq!(turn_text(&g), "game over: Checkmate. Black wins.");
+        assert!(!g.person_to_move());
+        let pgn = crate::save::pgn_text(&g, 0);
+        assert!(pgn.contains("[White \"Player 1\"]") && pgn.contains("[Black \"Player 2\"]"));
+        let parsed = crate::replay::parse_pgn(&pgn).unwrap();
+        assert!(parsed.two(), "read back as an in-person game");
+        assert_eq!(parsed.result, "0-1");
     }
 }

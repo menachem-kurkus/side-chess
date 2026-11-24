@@ -5,6 +5,9 @@
 //!
 //! Where things live:
 //!   game.rs   rules, typed and clicked moves, the files shared with the AI
+//!   home.rs   the home screen and its Keybinds and Look pages
+//!   keys.rs   which key does what (the person can change them)
+//!   resources.rs what the app is using, for the home screen
 //!   draw.rs   what the window shows (layout)
 //!   pack.rs   the look: colours and pieces from app/packs/<pack>/
 //!   text.rs   text from a baked atlas
@@ -15,6 +18,8 @@ mod canvas;
 mod draw;
 mod engine;
 mod game;
+mod home;
+mod keys;
 mod native;
 mod pack;
 #[cfg_attr(not(target_os = "macos"), path = "present_other.rs")]
@@ -22,16 +27,17 @@ mod present;
 mod rails;
 mod rating;
 mod replay;
+mod resources;
 mod save;
 mod score;
 mod text;
 mod threats;
 
-use canvas::{Canvas, Img};
-use draw::{promotion_at, square_at, View, H, SQ, W};
-use game::{
-    check_opponent_move, game_over, live_dir, pick_square, sq, write_state, Game, MoveStart,
-};
+use canvas::{Canvas, Color, Img};
+use draw::{menu_button_at, promotion_at, square_at, View, H, SQ, W};
+use game::{check_opponent_move, live_dir, pick_square, sq, write_state, Game, MoveStart};
+use home::{Info, Item, KeysHit, PacksHit, Page};
+use keys::{Action, Keymap, ACTIONS};
 use pack::{
     load_look_for, load_pack, piece_sets, save_pieces, saved_pack, saved_pieces, Theme, PACKS,
 };
@@ -100,6 +106,19 @@ struct App {
     piece_names: Vec<String>,     // the piece sets in the Pieces list
     pieces_choice: Option<usize>, // a piece set picked on its own; None follows the colours
     preview_pieces: Option<Option<usize>>, // a pieces row the pointer is on (None inside: "same as colours")
+    page: Page,        // the home screen, the board, or one of the home screen's pages
+    info: Info,        // what the home screen shows (score, memory...)
+    home_focus: usize, // the thing to do the keyboard or pointer is on
+    keys: Keymap,      // which key does what
+    keys_wait: Option<usize>, // the Keybinds row waiting for its new key
+    keys_msg: String,  // why the last key was refused
+    keys_hover: Option<KeysHit>,
+    packs_hover: Option<PacksHit>,
+    swatches: Vec<[Color; 3]>, // each look's light square, dark square and accent, for the packs page
+    redraw_ms: f32,            // how long the last frame took to draw
+    live_at: Instant,          // when the home screen's live numbers were last read
+    replay_from_home: bool, // the replay list was opened from the home screen: Esc goes back to it
+    ai_side: Side,          // the side the person last played against the AI
 }
 
 impl App {
@@ -123,6 +142,26 @@ impl App {
         let _ = fs::remove_file(live_dir().join("claude_move.txt"));
         let _ = fs::remove_file(live_dir().join("opponent_move.txt"));
         write_state(&g);
+        let (mut pack_names, mut swatches) = (vec![], vec![]);
+        for i in 0..PACKS.len() {
+            match Theme::load(i) {
+                Ok(t) => {
+                    pack_names.push(t.name.clone());
+                    swatches.push([t.light_square, t.dark_square, t.accent]);
+                }
+                Err(_) => {
+                    pack_names.push(PACKS[i].0.to_string());
+                    swatches.push([Color::rgba8(160, 160, 160, 255); 3]);
+                }
+            }
+        }
+        // testing: CHESS_PAGE=game|keys|packs starts there instead of on the home screen
+        let page = match std::env::var("CHESS_PAGE").as_deref() {
+            Ok("game") => Page::Game,
+            Ok("keys") => Page::Keys,
+            Ok("packs") => Page::Packs,
+            _ => Page::Home,
+        };
         App {
             window: None,
             presenter: None,
@@ -151,13 +190,7 @@ impl App {
             rails_away: false,
             prev_moves: 0,
             slide_from: None,
-            pack_names: (0..PACKS.len())
-                .map(|i| {
-                    Theme::load(i)
-                        .map(|t| t.name)
-                        .unwrap_or_else(|_| PACKS[i].0.to_string())
-                })
-                .collect(),
+            pack_names,
             piece_names: piece_sets()
                 .iter()
                 .map(|&i| {
@@ -172,6 +205,291 @@ impl App {
                 .collect(),
             pieces_choice: saved_pieces(),
             preview_pieces: None,
+            page,
+            info: Info::load(),
+            home_focus: 0,
+            keys: Keymap::load(),
+            keys_wait: None,
+            keys_msg: String::new(),
+            keys_hover: None,
+            packs_hover: None,
+            swatches,
+            redraw_ms: 0.0,
+            live_at: Instant::now(),
+            replay_from_home: false,
+            ai_side: Side::White,
+        }
+    }
+
+    /// The small print under each thing to do on the home screen.
+    fn home_subs(&self) -> [String; 5] {
+        let moves = self.g.sans.len().div_ceil(2);
+        let ai_playing = !self.g.two && !self.g.sans.is_empty() && self.g.over().is_none();
+        let (me, other) = if self.g.player == Side::White {
+            ("white", "black")
+        } else {
+            ("black", "white")
+        };
+        let ai = if self.g.two {
+            "Start a game against Claude or Codex".to_string()
+        } else if ai_playing {
+            format!("Continue your game, move {moves}")
+        } else if self.g.over().is_some() {
+            "Your last game is over: open the board for a new one".to_string()
+        } else {
+            format!("You play {me}; Claude or Codex plays {other}")
+        };
+        let two = if self.g.two && self.g.over().is_none() && !self.g.sans.is_empty() {
+            format!("Continue, move {moves}")
+        } else if ai_playing {
+            "Two people, one screen. Your AI game is saved".to_string()
+        } else {
+            "Two people, one screen: take turns on the board".to_string()
+        };
+        let plural = |n: u32| if n == 1 { "" } else { "s" };
+        let replays = match (self.info.saved, self.info.stockfish) {
+            (0, _) => "No saved games yet".to_string(),
+            (n, true) => format!("{n} saved game{}, rated by Stockfish", plural(n)),
+            (n, false) => format!("{n} saved game{}", plural(n)),
+        };
+        let keys = if self.keys.is_default() {
+            format!(
+                "New game {}, swap {}, take back {}, and more",
+                self.keys.label_of(Action::New),
+                self.keys.label_of(Action::Swap),
+                self.keys.label_of(Action::Undo)
+            )
+        } else {
+            "Your own shortcuts are set".to_string()
+        };
+        let packs = format!(
+            "Now: {} ({} looks)",
+            self.pack_names.get(self.pack).map_or("", |s| s.as_str()),
+            self.pack_names.len()
+        );
+        [ai, two, replays, keys, packs]
+    }
+
+    /// Go to the home screen, reading the score and the rest again.
+    fn go_home(&mut self) {
+        self.replay.leave();
+        self.replay_from_home = false;
+        let redraw_ms = self.redraw_ms;
+        self.info = Info::load();
+        self.info.redraw_ms = redraw_ms;
+        self.live_at = Instant::now();
+        self.page = Page::Home;
+        self.keys_wait = None;
+        self.keys_msg.clear();
+        self.dirty = true;
+    }
+
+    /// Do one of the five things on the home screen.
+    fn activate(&mut self, item: Item) {
+        match item {
+            Item::PlayAi => {
+                if self.g.two {
+                    // the in-person game is kept (saved if long enough); a new one against the AI
+                    save::save(&mut self.g);
+                    self.g = Game::new_as(self.ai_side);
+                    let _ = fs::remove_file(live_dir().join("claude_move.txt"));
+                    let _ = fs::remove_file(live_dir().join("opponent_move.txt"));
+                    write_state(&self.g);
+                }
+                self.page = Page::Game;
+            }
+            Item::InPerson => {
+                if !self.g.two {
+                    self.autosave();
+                    save::save(&mut self.g);
+                    self.ai_side = self.g.player;
+                    self.g = Game::new_two();
+                    write_state(&self.g);
+                }
+                self.page = Page::Game;
+            }
+            Item::Replays => {
+                self.page = Page::Game;
+                self.replay.open_list();
+                self.replay_from_home = true;
+            }
+            Item::Keybinds => {
+                self.keys_wait = None;
+                self.keys_msg.clear();
+                self.page = Page::Keys;
+            }
+            Item::Packs => self.page = Page::Packs,
+        }
+        self.dirty = true;
+    }
+
+    /// A click on the home screen or one of its pages.
+    fn page_click(&mut self) {
+        let (x, y) = self.mouse;
+        match self.page {
+            Page::Home => {
+                if let Some(i) = home::item_at(x, y) {
+                    self.home_focus = i;
+                    self.activate(home::ITEMS[i]);
+                }
+            }
+            Page::Keys => match home::keys_hit(x, y) {
+                Some(KeysHit::Back) => self.go_home(),
+                Some(KeysHit::Reset) => {
+                    self.keys = Keymap::defaults();
+                    self.keys.save();
+                    self.keys_wait = None;
+                    self.keys_msg.clear();
+                }
+                Some(KeysHit::Row(i)) => {
+                    self.keys_wait = if self.keys_wait == Some(i) {
+                        None
+                    } else {
+                        Some(i)
+                    };
+                    self.keys_msg.clear();
+                }
+                None => {
+                    self.keys_wait = None;
+                    self.keys_msg.clear();
+                }
+            },
+            Page::Packs => {
+                match home::packs_hit(x, y, self.pack_names.len(), self.piece_names.len() + 1) {
+                    Some(PacksHit::Back) => self.go_home(),
+                    Some(PacksHit::Colours(i)) => self.set_pack(i),
+                    Some(PacksHit::Pieces(row)) => self.set_pieces(Self::row_choice(row)),
+                    None => {}
+                }
+            }
+            Page::Game => {}
+        }
+        self.dirty = true;
+    }
+
+    /// The pointer moved over the home screen or one of its pages: light up what it is on.
+    fn page_hover(&mut self) {
+        let (x, y) = self.mouse;
+        match self.page {
+            Page::Home => {
+                if let Some(i) = home::item_at(x, y) {
+                    if i != self.home_focus {
+                        self.home_focus = i;
+                        self.dirty = true;
+                    }
+                }
+            }
+            Page::Keys => {
+                let hover = home::keys_hit(x, y);
+                if hover != self.keys_hover {
+                    self.keys_hover = hover;
+                    self.dirty = true;
+                }
+            }
+            Page::Packs => {
+                let hover =
+                    home::packs_hit(x, y, self.pack_names.len(), self.piece_names.len() + 1);
+                if hover != self.packs_hover {
+                    self.packs_hover = hover;
+                    self.dirty = true;
+                }
+            }
+            Page::Game => {}
+        }
+    }
+
+    /// Keys on the home screen or one of its pages.
+    fn page_key(&mut self, key: &Key, el: &ActiveEventLoop) {
+        let quit =
+            self.mods.super_key() || (cfg!(not(target_os = "macos")) && self.mods.control_key());
+        if let Key::Character(s) = key {
+            if quit && matches!(s.to_lowercase().as_str(), "q" | "w") {
+                el.exit();
+                return;
+            }
+        }
+        let n = home::ITEMS.len();
+        match self.page {
+            Page::Home => match key {
+                Key::Named(NamedKey::ArrowDown) => self.home_focus = (self.home_focus + 1) % n,
+                Key::Named(NamedKey::ArrowUp) => self.home_focus = (self.home_focus + n - 1) % n,
+                Key::Named(NamedKey::Enter) => self.activate(home::ITEMS[self.home_focus]),
+                // back to the board, where you left it
+                Key::Named(NamedKey::Escape) => self.page = Page::Game,
+                Key::Character(s) if !quit => {
+                    if s.chars().next().and_then(|c| self.keys.action(c)) == Some(Action::Menu) {
+                        self.page = Page::Game;
+                    }
+                }
+                _ => {}
+            },
+            Page::Keys => match (key, self.keys_wait) {
+                (Key::Named(NamedKey::Escape), Some(_)) => {
+                    self.keys_wait = None;
+                    self.keys_msg.clear();
+                }
+                (Key::Named(NamedKey::Escape), None) => self.go_home(),
+                (Key::Character(s), Some(row)) if !quit => {
+                    if let Some(c) = s.chars().next() {
+                        match self.keys.set(ACTIONS[row], c) {
+                            Ok(()) => {
+                                self.keys.save();
+                                self.keys_wait = None;
+                                self.keys_msg.clear();
+                            }
+                            Err(why) => self.keys_msg = why,
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Page::Packs => {
+                if matches!(key, Key::Named(NamedKey::Escape)) {
+                    self.go_home();
+                }
+            }
+            Page::Game => {}
+        }
+        self.dirty = true;
+    }
+
+    /// Do what a shortcut key stands for.
+    fn do_action(&mut self, a: Action, el: &ActiveEventLoop) {
+        match a {
+            Action::New => {
+                save::save(&mut self.g);
+                self.g = if self.g.two {
+                    Game::new_two()
+                } else {
+                    Game::new_as(self.g.player)
+                };
+                write_state(&self.g);
+            }
+            // swap sides: only between games (refused mid-game: press New game first)
+            Action::Swap => {
+                self.autosave();
+                self.g.swap_sides();
+            }
+            Action::Undo => self.g.undo(),
+            Action::Look if PACKS.len() > 1 => self.set_pack(self.pack + 1),
+            Action::Look => {}
+            Action::Shot => self.shot = true,
+            // the list of saved games
+            Action::Replays => {
+                self.replay.open_list();
+                self.replay_from_home = false;
+            }
+            // arrows from every piece to what it attacks
+            Action::Arrows => self.arrows = !self.arrows,
+            Action::KeysPanel => {
+                self.rails.press_key(Panel::Keys);
+                self.rails_changed(el);
+            }
+            Action::LookPanel => {
+                self.rails.press_key(Panel::Look);
+                self.rails_changed(el);
+            }
+            Action::Menu => self.go_home(),
         }
     }
 
@@ -366,6 +684,7 @@ impl App {
             slide: None,
             arrows: false,
             replay: None,
+            keys: &self.keys,
         };
         rw.presenter.frame(w, h, scale, screen, |px| {
             let mut cv = Canvas::new(px, w, h, scale as f32);
@@ -375,7 +694,7 @@ impl App {
 
     /// Keep the game on disk once it is over (see save.rs for the rules).
     fn autosave(&mut self) {
-        if game_over(&self.g.pos, self.g.player).is_some() {
+        if self.g.over().is_some() {
             let saved = save::save(&mut self.g);
             // the result moves both ratings, once per game
             if let (Some(path), false) = (saved, self.g.rated) {
@@ -386,11 +705,19 @@ impl App {
     }
 
     fn my_turn(&self) -> bool {
-        self.g.pos.turn() == self.g.player && game_over(&self.g.pos, self.g.player).is_none()
+        self.g.person_to_move()
     }
 
     fn click(&mut self) {
+        if self.page != Page::Game {
+            self.page_click();
+            return;
+        }
         if self.replay.active() {
+            return;
+        }
+        if menu_button_at(self.mouse.0, self.mouse.1) {
+            self.go_home();
             return;
         }
         if self.g.promotion.is_some() {
@@ -406,7 +733,8 @@ impl App {
         if !self.my_turn() {
             return;
         }
-        let flip = self.g.player == Side::Black;
+        // the board turns round for black against the AI; in person white stays at the bottom
+        let flip = !self.g.two && self.g.player == Side::Black;
         let Some(clicked) = square_at(self.mouse.0, self.mouse.1, flip) else {
             return;
         };
@@ -414,7 +742,7 @@ impl App {
         let started = g.selected.map(|from| g.try_move(from, clicked));
         if matches!(started, Some(MoveStart::Played | MoveStart::NeedPromotion)) {
             // played, or waiting for the piece to be picked
-        } else if g.pos.board().piece_at(clicked).map(|p| p.color) == Some(g.player) {
+        } else if g.pos.board().piece_at(clicked).map(|p| p.color) == Some(g.mover()) {
             g.target = None;
             g.selected = if g.selected == Some(clicked) {
                 None
@@ -428,8 +756,16 @@ impl App {
     }
 
     fn key(&mut self, key: &Key, el: &ActiveEventLoop) {
+        if self.page != Page::Game {
+            self.page_key(key, el);
+            return;
+        }
         if self.replay.active() {
             self.replay_key(key, el);
+            // a replay opened from the home screen goes back there when it is left
+            if self.replay_from_home && !self.replay.active() {
+                self.go_home();
+            }
             self.dirty = true;
             return;
         }
@@ -483,33 +819,12 @@ impl App {
                         // a letter and a number, in either order, name a square
                         f @ 'a'..='h' => self.kb_file = Some(f as u32 - 'a' as u32),
                         r @ '1'..='8' => self.kb_rank = Some(r as u32 - '1' as u32),
-                        'n' => {
-                            save::save(&mut self.g);
-                            self.g = Game::new_as(self.g.player);
-                            write_state(&self.g);
+                        // everything else is a shortcut the person can change (keys.rs)
+                        other => {
+                            if let Some(a) = self.keys.action(other) {
+                                self.do_action(a, el);
+                            }
                         }
-                        // swap sides: only between games (refused mid-game: press N first)
-                        's' => {
-                            self.autosave();
-                            self.g.swap_sides();
-                        }
-                        'u' => self.g.undo(),
-                        't' if PACKS.len() > 1 => self.set_pack(self.pack + 1),
-                        'p' => self.shot = true,
-                        // R: look at a saved game
-                        'r' => self.replay.open_list(),
-                        // X: arrows from every piece to what it attacks
-                        'x' => self.arrows = !self.arrows,
-                        // K and L open, close or bring back the keys and look rails
-                        'k' => {
-                            self.rails.press_key(Panel::Keys);
-                            self.rails_changed(el);
-                        }
-                        'l' => {
-                            self.rails.press_key(Panel::Look);
-                            self.rails_changed(el);
-                        }
-                        _ => {}
                     }
                 }
                 if let (Some(f), Some(r)) = (self.kb_file, self.kb_rank) {
@@ -594,6 +909,8 @@ impl App {
                 self.native_seen = native::read();
             }
         }
+        // The text too: redrawn once for this screen's scale, so a letter is a plain copy
+        self.txt.fit(scale);
         // Windows screens often run at 125% or 150%: redraw the pieces once at the
         // exact size they are shown, so a frame copies pixels instead of resampling.
         // (A Mac's 2x screen is close enough to the 128 px tiles; left as it was.)
@@ -633,22 +950,53 @@ impl App {
             slide,
             arrows: self.arrows,
             replay: self.replay.active().then_some(&self.replay),
+            keys: &self.keys,
         };
         let Some(screen) = &self.screen else {
             return;
         };
-        let (g, shot) = (&self.g, &mut self.shot);
+        let g = &self.g;
+        let (page, subs) = (self.page, self.home_subs());
+        let (info, keys) = (&self.info, &self.keys);
+        let (th, txt) = (&self.th, &self.txt);
+        let (names, swatches, piece_names) = (&self.pack_names, &self.swatches, &self.piece_names);
+        let (pack, pieces_row, focus) = (self.pack, self.pieces_row(), self.home_focus);
+        let (keys_wait, keys_msg) = (self.keys_wait, self.keys_msg.as_str());
+        let (keys_hover, packs_hover) = (self.keys_hover, self.packs_hover);
+        let shot = &mut self.shot;
+        let drawn = Instant::now();
         // The presenter hands the closure the pixels to draw into: the window's own
         // buffer where the system allows (Windows), else a frame it then hands over (Mac).
         presenter.frame(w, h, scale, screen, |px| {
             let mut cv = Canvas::new(px, w, h, scale as f32);
-            draw::frame(&mut cv, g, &view);
+            match page {
+                Page::Game => draw::frame(&mut cv, g, &view),
+                Page::Home => home::draw_home(&mut cv, th, txt, info, &subs, focus),
+                Page::Keys => {
+                    home::draw_keys(&mut cv, th, txt, keys, keys_wait, keys_msg, keys_hover)
+                }
+                Page::Packs => home::draw_packs(
+                    &mut cv,
+                    th,
+                    txt,
+                    names,
+                    swatches,
+                    piece_names,
+                    pack,
+                    pieces_row,
+                    packs_hover,
+                ),
+            }
             if *shot {
                 *shot = false;
                 let _ = fs::create_dir_all(live_dir());
                 let _ = cv.save_png(&live_dir().join("screen.png"), screen.icc());
             }
         });
+        // the home screen shows how long a frame takes: the last one measured
+        let ms = drawn.elapsed().as_secs_f32() * 1000.0;
+        self.redraw_ms = ms;
+        self.info.redraw_ms = ms;
         // the rails wait for the board to work out the screen's colours: draw them now
         if screen_changed {
             for r in &self.rail_wins {
@@ -723,6 +1071,7 @@ impl ApplicationHandler for App {
                 None => {
                     let s = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
                     self.mouse = ((position.x / s) as f32, (position.y / s) as f32);
+                    self.page_hover();
                 }
             },
             WindowEvent::CursorLeft { .. } => {
@@ -820,13 +1169,18 @@ impl ApplicationHandler for App {
                 r.window.set_visible(!minimised);
             }
         }
+        if self.page == Page::Home && self.live_at.elapsed() >= Duration::from_secs(1) {
+            self.live_at = Instant::now();
+            self.info.refresh();
+            self.dirty = true;
+        }
         let shot_req = live_dir().join("shot");
         if shot_req.exists() {
             let _ = fs::remove_file(&shot_req);
             self.shot = true;
             self.dirty = true;
         }
-        if self.g.pos.turn() != self.g.player && game_over(&self.g.pos, self.g.player).is_none() {
+        if !self.g.two && self.g.pos.turn() != self.g.player && self.g.over().is_none() {
             let dots = (self.start.elapsed().as_millis() / 500 % 3) as usize + 1;
             if dots != self.dots {
                 self.dots = dots;

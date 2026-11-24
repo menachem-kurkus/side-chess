@@ -7,6 +7,7 @@
 use crate::canvas::{Canvas, Color};
 use crate::draw::{piece_tile, View, BY, SQ, W};
 use crate::game::live_dir;
+use crate::keys::{Action, Keymap};
 use crate::pack::Theme;
 use shakmaty::{Color as Side, Role};
 use std::fs;
@@ -268,29 +269,44 @@ impl Rails {
 }
 
 /// What each key does, as (key, what it does).
-fn key_rows() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("a-h  1-8", "Pick a square"),
-        ("Enter", "Play the move"),
-        ("Esc", "Clear it"),
-        ("U", "Take back"),
-        ("R", "Saved games"),
-        ("X", "Threat arrows"),
-        ("N", "New game"),
-        ("S", "Swap sides"),
-        ("T", "Next look"),
-        ("P", "Screenshot"),
-        ("K", "This panel"),
-        ("L", "Look panel"),
-        (
-            if cfg!(target_os = "macos") {
-                "Cmd+Q"
-            } else {
-                "Ctrl+Q"
+fn key_rows(keys: &Keymap) -> Vec<(String, &'static str)> {
+    let mut rows: Vec<(String, &'static str)> = vec![
+        ("a-h  1-8".into(), "Pick a square"),
+        ("Enter".into(), "Play the move"),
+        ("Esc".into(), "Clear it"),
+    ];
+    // the keys the person can change (see keys.rs), as they are set now
+    for a in [
+        Action::Undo,
+        Action::Replays,
+        Action::Arrows,
+        Action::New,
+        Action::Swap,
+        Action::Look,
+        Action::Shot,
+        Action::KeysPanel,
+        Action::LookPanel,
+        Action::Menu,
+    ] {
+        rows.push((
+            keys.label_of(a),
+            match a {
+                Action::KeysPanel => "This panel",
+                Action::Menu => "Home screen",
+                other => other.label(),
             },
-            "Quit",
-        ),
-    ]
+        ));
+    }
+    rows.push((
+        if cfg!(target_os = "macos") {
+            "Cmd+Q"
+        } else {
+            "Ctrl+Q"
+        }
+        .into(),
+        "Quit",
+    ));
+    rows
 }
 
 /// A chevron: `dir` is +1 to point right, -1 to point left.
@@ -459,8 +475,8 @@ pub fn draw_panel(cv: &mut Canvas<'_>, v: &View, p: Panel, hover: Option<Hit>) {
     let top = HEAD;
     match p {
         Panel::Keys => {
-            for (i, (key, what)) in key_rows().iter().enumerate() {
-                let y = top + 32.0 + i as f32 * 30.0;
+            for (i, (key, what)) in key_rows(v.keys).iter().enumerate() {
+                let y = top + 32.0 + i as f32 * 28.0;
                 txt.draw(cv, "r14", key, 14.0, y, th.title);
                 txt.draw(cv, "r14", what, 100.0, y, th.text);
             }
@@ -752,6 +768,7 @@ mod tests {
                 pieces_row: 0,
                 slide: None,
                 replay: None,
+                keys: &crate::keys::Keymap::defaults(),
                 arrows: false,
             };
             draw_panel(&mut Canvas::new(&mut px, w, h, scale), &view, p, hover);

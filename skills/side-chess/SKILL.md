@@ -61,4 +61,6 @@ When `turn:` starts with `game over:`, say the result in one line. Keep watching
 
 ## Keys in the window (for the user)
 
+The window opens on a home screen (score, resources, five buttons), not on the board: the person clicks **Play against AI** or presses Enter to reach the board, and M or the Menu button brings them back. **Play in person** is two people at one screen: `turn:` says `(player)` for both sides, so it is never your move and you say nothing. Every shortcut below is a default the person can change on the Change keybinds page.
+
 Click a piece then a square (a pawn reaching the last rank asks which piece it becomes: click it, or press Q, R, B or N), or type a square's letter and number (either order; half a square tints its row or column), then the target square, then Enter. Esc clears, U takes back, N starts a new game, S swaps sides (you play black, the AI white) and starts a new game, only between games (mid-game press N first), T switches the look (pack), P saves a screenshot, X shows threat arrows, R replays a saved game, rated by Stockfish when it is installed (list, then Enter; Left/Right/Home/End step, Esc leaves; saved as PGN in ~/.side-chess/games/), K and L open, close or bring back the two thin side windows beside the board (keys on the left, look on the right).

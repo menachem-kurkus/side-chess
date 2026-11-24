@@ -63,7 +63,12 @@ pub fn result_text(pos: &Chess) -> &'static str {
 pub fn pgn_text(g: &Game, secs: u64) -> String {
     let (y, mo, d, ..) = civil(secs);
     let (you, ai) = ("You", "AI");
-    let (white, black) = if g.player == Side::White {
+    let (white, black) = if g.two {
+        (
+            crate::replay::IN_PERSON_WHITE,
+            crate::replay::IN_PERSON_BLACK,
+        )
+    } else if g.player == Side::White {
         (you, ai)
     } else {
         (ai, you)
