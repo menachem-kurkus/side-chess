@@ -24,7 +24,7 @@ Thanks for helping. Anyone can open an issue or a pull request.
 
    If cargo cannot download crates and reports a revocation error (some proxies and antivirus), set `CARGO_HTTP_CHECK_REVOKE=false` for that shell.
 
-3. **Memory stays under 100 MB.** `scripts/check-memory.sh` launches the app, has Claude play a move and saves a screenshot, and fails if macOS reports 100 MB or more at any point in a minute (Activity Monitor's "Memory" column). It measures about 35 MB at its peak on an Apple silicon Mac with a Retina screen. On Windows `scripts/check-memory.ps1` does the same with the private working set (Task Manager's "Memory" column): about 8 MB on Windows 11, and CI holds it under 30 MB. Keep that headroom:
+3. **Memory stays small: the budget is 30 MB.** Windows enforces it (`scripts/check-memory.ps1 -Limit 30`, Task Manager's Memory column; about 9 MB today), and the home screen shows the live figure. The Mac check below still allows 100 MB because the Mac number (about 35 MB at its peak) has not been brought under 30 yet. Speed counts the same way: a frame should stay in the low milliseconds (the home screen shows the last redraw time), so don't resample or recompute per pixel what can be done once per screen scale, as `text.rs` and `canvas.rs` do for letters and pieces. The Mac rule: `scripts/check-memory.sh` launches the app, has Claude play a move and saves a screenshot, and fails if macOS reports 100 MB or more at any point in a minute (Activity Monitor's "Memory" column). It measures about 35 MB at its peak on an Apple silicon Mac with a Retina screen. On Windows `scripts/check-memory.ps1` does the same with the private working set (Task Manager's "Memory" column): about 8 MB on Windows 11, and CI holds it under 30 MB. Keep that headroom:
    - Draw with `canvas.rs` (plain memory). Don't add a GPU or graphics library: the graphics driver alone costs 60 MB or more and varies by machine.
    - Draw straight into the window's buffer; don't keep a second copy of the screen (each copy is about 7 MB on a Retina screen).
    - Hand frames to macOS in the screen's own colours (`present.rs`). Colours that reach the canvas must come from the pack, converted with `load_pack_for`; a colour written straight into the code would show slightly wrong on wide-colour screens.
@@ -47,6 +47,9 @@ Thanks for helping. Anyone can open an issue or a pull request.
 | `app/src/text.rs` | Text from the baked atlas |
 | `app/src/main.rs` | The window, keys and mouse |
 | `app/src/rails.rs` | The two thin side windows: Keys (K) and Look (L) |
+| `app/src/home.rs` | The home screen (score, resources, five things to do) and its Keybinds and Look pages |
+| `app/src/keys.rs` | Which key does what, and the keys.txt the person's choices are kept in |
+| `app/src/resources.rs` | The app's own memory, for the home screen's gauge |
 | `app/src/native.rs` | The Native look: colours read from the operating system |
 | `app/src/save.rs` | Saving finished games as PGN in `~/.side-chess/games/` |
 | `app/src/replay.rs` | The saved-games list and replay (R) |

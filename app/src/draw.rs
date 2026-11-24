@@ -1,7 +1,8 @@
 //! What the window shows. Every colour comes from the pack (`th`), every size
 //! from the layout constants below, so a new look never needs code changes.
 use crate::canvas::{Canvas, Color, Img};
-use crate::game::{game_over, move_list, shown_to, sq, Game};
+use crate::game::{move_list, shown_to, sq, Game};
+use crate::keys::{Action, Keymap};
 use crate::pack::Theme;
 use crate::rails::Rails;
 use crate::text::Txt;
@@ -33,6 +34,16 @@ pub struct View<'a> {
     pub slide: Option<f32>,        // 0..1 while the last move's piece is sliding into place
     pub arrows: bool,              // X: arrows from every attacker to what it attacks
     pub replay: Option<&'a crate::replay::State>, // a saved game's list or a game being replayed
+    pub keys: &'a Keymap,          // which key does what (shown where a key is named)
+}
+
+/// The Menu button in the header (it takes the person to the home screen): x, y, w, h.
+pub const MENU_BTN: (f32, f32, f32, f32) = (150.0, 24.0, 74.0, 30.0);
+
+/// Is the point on the header's Menu button?
+pub fn menu_button_at(x: f32, y: f32) -> bool {
+    let (bx, by, bw, bh) = MENU_BTN;
+    (bx..=bx + bw).contains(&x) && (by..=by + bh).contains(&y)
 }
 
 /// Where a square is drawn. The player's own pieces are at the bottom, so the
@@ -122,7 +133,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     cv.rect(BX, 22.0, 6.0, 36.0, th.accent);
     txt.draw(cv, "b30", "Chess", BX + 18.0, 51.0, on_band);
     // the status sits in a capsule: gold-accent when it is your move, quiet otherwise
-    let (status, capsule) = match game_over(&g.pos, g.player) {
+    let (status, capsule) = match g.over() {
         _ if run.is_some() => (
             run.map_or(String::new(), |r| {
                 if r.idx == 0 {
@@ -138,6 +149,22 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             band0.mix(on_band, 0.78),
         ),
         Some(_) => ("Game over".to_string(), band0.mix(on_band, 0.78)),
+        None if g.two => (
+            format!(
+                "{} to move{}",
+                if g.pos.turn() == Side::White {
+                    "White"
+                } else {
+                    "Black"
+                },
+                if g.pos.is_check() { ". Check." } else { "" }
+            ),
+            if g.pos.is_check() {
+                th.error
+            } else {
+                th.accent
+            },
+        ),
         None if g.pos.turn() == g.player => (
             if g.pos.is_check() {
                 "Your move. You're in check."
@@ -152,7 +179,15 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             },
         ),
         None => (
-            format!("AI is thinking{}", ".".repeat(v.thinking_dots)),
+            format!(
+                "{} is thinking{}",
+                if g.engine.is_some() {
+                    "Stockfish"
+                } else {
+                    "AI"
+                },
+                ".".repeat(v.thinking_dots)
+            ),
             band0.mix(on_band, 0.72),
         ),
     };
@@ -161,15 +196,37 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     cv.rrect(W - BX - sw - 28.0, 20.0, sw + 28.0, 36.0, 18.0, capsule);
     txt.draw(cv, "b18", &status, W - BX - sw - 14.0, 44.0, capsule_ink);
 
+    // The way back to the home screen (not while a replay is using this part of the band)
+    if run.is_none() {
+        let (bx, by, bw, bh) = MENU_BTN;
+        cv.rrect(bx, by, bw, bh, 15.0, band0.mix(on_band, 0.78));
+        let ink = band0.mix(on_band, 0.78).ink(th.background, th.text);
+        txt.draw(
+            cv,
+            "b18",
+            "Menu",
+            bx + (bw - txt.width("b18", "Menu")) / 2.0,
+            by + 21.0,
+            ink,
+        );
+    }
+
     // A replay whose positions are all scored: how each side played, the person first
     if let Some(sc) = run.and_then(|r| r.score) {
         let x = BX + 18.0 + txt.width("b30", "Chess") + 28.0;
         for side in [Side::White, Side::Black] {
             let s = sc.of(side);
             let mine = side == g.player;
+            let who = match (g.two, side) {
+                (true, Side::White) => "White",
+                (true, Side::Black) => "Black",
+                (false, _) if mine => "You",
+                _ if g.engine.is_some() => "Stockfish",
+                _ => "AI",
+            };
             let line = format!(
                 "{} {:.0}% accurate, about {}",
-                if mine { "You" } else { "AI" },
+                who,
                 s.accuracy,
                 crate::score::estimate(s.acpl)
             );
@@ -354,7 +411,7 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
     }
 
     // Game over: banner across the board
-    if let Some(msg) = game_over(&g.pos, g.player).filter(|_| run.is_none()) {
+    if let Some(msg) = g.over().filter(|_| run.is_none()) {
         cv.rect(BX, BY, SQ * 8.0, SQ * 8.0, th.shade);
         let (bw, bh) = (380.0, 150.0);
         let (bx, by) = (BX + (SQ * 8.0 - bw) / 2.0, BY + (SQ * 8.0 - bh) / 2.0);
@@ -379,7 +436,8 @@ pub fn frame(cv: &mut Canvas<'_>, g: &Game, v: &View) {
             by + 92.0,
             th.banner_result,
         );
-        let again = "Press N for a new game";
+        let again = format!("Press {} for a new game", v.keys.label_of(Action::New));
+        let again = again.as_str();
         txt.draw(cv, "r14", again, center("r14", again), by + 126.0, th.muted);
     }
 
@@ -492,7 +550,7 @@ fn draw_engine(cv: &mut Canvas<'_>, g: &Game, v: &View, r: &crate::replay::Run, 
         }
     }
     // the engine's move, as an arrow in the look's accent
-    if let (Some((from, to)), None) = (e.best, game_over(&g.pos, g.player)) {
+    if let (Some((from, to)), None) = (e.best, g.over()) {
         let (fx, fy) = square_xy(from, flip);
         let (tx, ty) = square_xy(to, flip);
         let half = SQ / 2.0;
@@ -587,7 +645,7 @@ fn draw_picker(
         let lines = [
             "No saved games yet.",
             "A game of five moves or more is saved when it ends,",
-            "when you press N, and when you quit.",
+            "when you start a new game, and when you quit.",
         ];
         for (i, l) in lines.iter().enumerate() {
             txt.draw(
@@ -706,6 +764,7 @@ mod tests {
                 pieces_row: 0,
                 slide: None,
                 replay: None,
+                keys: &crate::keys::Keymap::defaults(),
                 arrows: false,
             };
             let mut cv = Canvas::new(&mut px, w, h, 2.0);
@@ -813,6 +872,7 @@ mod tests {
                 slide: None,
                 arrows: false,
                 replay: Some(state),
+                keys: &crate::keys::Keymap::defaults(),
             };
             let mut cv = Canvas::new(&mut px, w, h, 2.0);
             frame(&mut cv, &g, &v);

@@ -4,9 +4,9 @@
 //! is being replayed. The engine is stopped when the replay is left.
 use shakmaty::{Color as Side, Square};
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Lines, Write},
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     str::FromStr,
     sync::mpsc::{channel, Receiver, Sender},
     thread::{self, JoinHandle},
@@ -145,6 +145,13 @@ impl Search {
                             self.cp = Some((n * sign).clamp(-CAP, CAP));
                             self.mate = None;
                         }
+                        // "mate 0" is a position that is already checkmate: the side to move
+                        // has lost, so the score is for the other side (n * sign alone is 0
+                        // either way and would always read as a win for black)
+                        (Some(&"mate"), Some(0)) => {
+                            self.cp = Some(if white_to_move { -CAP } else { CAP });
+                            self.mate = Some(0);
+                        }
                         (Some(&"mate"), Some(n)) => {
                             self.cp = Some(if n * sign > 0 { CAP } else { -CAP });
                             self.mate = Some(n * sign);
@@ -199,40 +206,70 @@ impl Drop for Engine {
     }
 }
 
-fn run(path: PathBuf, jobs: Receiver<Vec<String>>, out: Sender<(usize, Eval)>) {
-    let mut cmd = Command::new(&path);
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    // the app is a Windows GUI program: without this a console window flashes up
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    let Ok(mut child) = cmd.spawn() else {
-        return;
-    };
-    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        return;
-    };
-    let mut lines = BufReader::new(stdout).lines();
-    let mut send = |s: &str| writeln!(stdin, "{s}").and_then(|_| stdin.flush()).is_ok();
-    let ready = send("uci")
-        && send("setoption name Threads value 1")
-        && send("setoption name Hash value 16")
-        && send("isready");
-    if !ready {
-        return;
-    }
-    // wait until it says it is ready
-    loop {
-        match lines.next() {
-            Some(Ok(l)) if l.trim() == "readyok" => break,
-            Some(Ok(_)) => {}
-            _ => return,
+/// An engine process we talk to over UCI. Dropping it stops the engine.
+struct Uci {
+    child: Child,
+    stdin: ChildStdin,
+    lines: Lines<BufReader<ChildStdout>>,
+}
+
+impl Uci {
+    /// Start the program at `path`, set each of `options` ("Hash value 16") and wait until
+    /// it says it is ready.
+    fn launch(path: &PathBuf, options: &[String]) -> Option<Uci> {
+        let mut cmd = Command::new(path);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        // the app is a Windows GUI program: without this a console window flashes up
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let mut child = cmd.spawn().ok()?;
+        let (stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
+        let mut uci = Uci {
+            child,
+            stdin,
+            lines: BufReader::new(stdout).lines(),
+        };
+        let mut ok = uci.send("uci");
+        for o in options {
+            ok = ok && uci.send(&format!("setoption name {o}"));
+        }
+        if !(ok && uci.send("isready")) {
+            return None;
+        }
+        loop {
+            match uci.lines.next() {
+                Some(Ok(l)) if l.trim() == "readyok" => return Some(uci),
+                Some(Ok(_)) => {}
+                _ => return None,
+            }
         }
     }
+
+    fn send(&mut self, line: &str) -> bool {
+        writeln!(self.stdin, "{line}")
+            .and_then(|_| self.stdin.flush())
+            .is_ok()
+    }
+}
+
+impl Drop for Uci {
+    fn drop(&mut self) {
+        let _ = self.send("quit");
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn run(path: PathBuf, jobs: Receiver<Vec<String>>, out: Sender<(usize, Eval)>) {
+    let options = ["Threads value 1".to_string(), "Hash value 16".to_string()];
+    let Some(mut uci) = Uci::launch(&path, &options) else {
+        return;
+    };
     'jobs: while let Ok(fens) = jobs.recv() {
         for (i, fen) in fens.iter().enumerate() {
             // a closed channel (the replay was left) ends the work between positions
@@ -243,12 +280,13 @@ fn run(path: PathBuf, jobs: Receiver<Vec<String>>, out: Sender<(usize, Eval)>) {
                 break 'jobs;
             }
             let white = fen.split(' ').nth(1) != Some("b");
-            if !(send(&format!("position fen {fen}")) && send(&format!("go depth {DEPTH}"))) {
+            if !(uci.send(&format!("position fen {fen}")) && uci.send(&format!("go depth {DEPTH}")))
+            {
                 break 'jobs;
             }
             let mut search = Search::default();
             loop {
-                match lines.next() {
+                match uci.lines.next() {
                     Some(Ok(l)) => {
                         if let Some(e) = search.line(&l, white) {
                             if out.send((i, e)).is_err() {
@@ -262,9 +300,102 @@ fn run(path: PathBuf, jobs: Receiver<Vec<String>>, out: Sender<(usize, Eval)>) {
             }
         }
     }
-    let _ = send("quit");
-    let _ = child.kill();
-    let _ = child.wait();
+}
+
+/// The weakest and strongest settings Stockfish's UCI_Elo accepts (its own scale, which is
+/// not the same as chess.com or Lichess ratings).
+pub const MIN_ELO: u32 = 1320;
+pub const MAX_ELO: u32 = 3190;
+
+/// A strength as Stockfish takes it: inside its range.
+pub fn clamp_elo(elo: u32) -> u32 {
+    elo.clamp(MIN_ELO, MAX_ELO)
+}
+
+/// A few words for what a strength feels like.
+pub fn elo_word(elo: u32) -> &'static str {
+    match elo {
+        ..=1499 => "Beginner: makes plain mistakes",
+        1500..=1799 => "Casual player",
+        1800..=2099 => "Club player",
+        2100..=2499 => "Strong club player",
+        2500..=2899 => "Master",
+        _ => "Engine: very hard to beat",
+    }
+}
+
+/// Stockfish playing one side of a game: asked for one move at a time, in a background
+/// thread, so the window never waits for it. Its own process is started on the first
+/// question and stopped when this is dropped (a game that ends, a new game, leaving).
+pub struct Player {
+    asks: Option<Sender<String>>,
+    /// Each answer: the position asked (as FEN) and the move in UCI ("e2e4", "e7e8q").
+    pub answers: Receiver<(String, String)>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl Player {
+    pub fn start(path: PathBuf, elo: u32) -> Player {
+        let (asks, ask_rx) = channel::<String>();
+        let (out, answers) = channel();
+        let handle = thread::spawn(move || play(path, clamp_elo(elo), ask_rx, out));
+        Player {
+            asks: Some(asks),
+            answers,
+            handle: Some(handle),
+        }
+    }
+
+    /// Ask for the engine's move in a position.
+    pub fn ask(&self, fen: String) {
+        if let Some(a) = &self.asks {
+            let _ = a.send(fen);
+        }
+    }
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        self.asks = None; // the worker sees the channel close, stops and ends the engine
+        let _ = self.handle.take(); // it may be mid-search; it ends when that does
+    }
+}
+
+fn play(path: PathBuf, elo: u32, asks: Receiver<String>, out: Sender<(String, String)>) {
+    let mut options = vec!["Threads value 1".to_string(), "Hash value 16".to_string()];
+    // at the top of the range the engine plays all it can; below it, it is held to the Elo
+    if elo < MAX_ELO {
+        options.push("UCI_LimitStrength value true".into());
+        options.push(format!("UCI_Elo value {elo}"));
+    }
+    let Some(mut uci) = Uci::launch(&path, &options) else {
+        return;
+    };
+    let ms = if elo < MAX_ELO { 700 } else { 1500 };
+    while let Ok(fen) = asks.recv() {
+        if !(uci.send(&format!("position fen {fen}")) && uci.send(&format!("go movetime {ms}"))) {
+            return;
+        }
+        let best = loop {
+            match uci.lines.next() {
+                Some(Ok(l)) => {
+                    let w: Vec<&str> = l.split_whitespace().collect();
+                    if w.first() == Some(&"bestmove") {
+                        break w.get(1).map(|m| m.to_string());
+                    }
+                }
+                _ => return,
+            }
+        };
+        match best {
+            Some(m) if m != "(none)" => {
+                if out.send((fen, m)).is_err() {
+                    return;
+                }
+            }
+            _ => return, // no legal move: the game is over
+        }
+    }
 }
 
 #[cfg(test)]
@@ -301,6 +432,70 @@ mod tests {
         s.line("info depth 9 score mate -2 pv a1a2", true);
         let r = s.line("bestmove a1a2", true).unwrap();
         assert_eq!((r.cp, r.mate), (-CAP, Some(-2)));
+    }
+
+    #[test]
+    fn a_checkmate_position_scores_for_the_side_that_mated() {
+        // Stockfish says "mate 0" for a position that is already checkmate. White's
+        // mating move leaves black to move and mated: that is +CAP for white, so the
+        // mating move costs nothing (it was once marked a 20 pawn blunder).
+        let mut s = Search::default();
+        s.line("info depth 0 score mate 0", false);
+        let after = s.line("bestmove (none)", false).unwrap();
+        assert_eq!(
+            (after.cp, after.mate, after.text()),
+            (CAP, Some(0), "#0".to_string())
+        );
+        assert_eq!(loss(&e(CAP), &after, Side::White), 0);
+        // and the other way round: white to move and mated is a win for black
+        s.line("info depth 0 score mate 0", true);
+        let after = s.line("bestmove (none)", true).unwrap();
+        assert_eq!(after.cp, -CAP);
+        assert_eq!(loss(&e(-CAP), &after, Side::Black), 0);
+    }
+
+    #[test]
+    #[ignore] // needs a real Stockfish: SIDE_CHESS_ENGINE=<path> cargo test -- --ignored
+    fn real_stockfish_scores_a_checkmate_for_the_side_that_mated() {
+        let path = find_engine().expect("no Stockfish found");
+        // the end of a real game: white has just played Qa2#, black to move
+        let engine = Engine::start(path, vec!["8/8/3N4/p7/k7/3N3P/Q7/7K b - - 3 42".into()]);
+        let (_, e) = engine
+            .results
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("an answer");
+        assert_eq!((e.cp, e.text()), (CAP, "#0".to_string()));
+    }
+
+    #[test]
+    fn strengths_are_kept_inside_stockfishs_range_and_described() {
+        assert_eq!(clamp_elo(100), MIN_ELO);
+        assert_eq!(clamp_elo(5000), MAX_ELO);
+        assert_eq!(clamp_elo(1800), 1800);
+        assert_ne!(elo_word(MIN_ELO), elo_word(MAX_ELO));
+        assert!(elo_word(1600).contains("Casual"));
+    }
+
+    #[test]
+    #[ignore] // needs a real Stockfish: SIDE_CHESS_ENGINE=<path> cargo test -- --ignored
+    fn real_stockfish_answers_with_a_legal_move_at_a_chosen_strength() {
+        let path = find_engine().expect("no Stockfish found");
+        let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+        for elo in [MIN_ELO, 2000, MAX_ELO] {
+            let player = Player::start(path.clone(), elo);
+            player.ask(fen.to_string());
+            let (asked, mv) = player
+                .answers
+                .recv_timeout(std::time::Duration::from_secs(15))
+                .expect("an answer");
+            assert_eq!(asked, fen, "the answer says which position it is for");
+            let pos: shakmaty::Chess = fen
+                .parse::<shakmaty::fen::Fen>()
+                .unwrap()
+                .into_position(shakmaty::CastlingMode::Standard)
+                .unwrap();
+            assert!(crate::game::parse_move(&pos, &mv).is_some(), "{elo}: {mv}");
+        }
     }
 
     #[test]

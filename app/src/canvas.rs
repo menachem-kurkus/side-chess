@@ -137,6 +137,23 @@ impl Img {
         out
     }
 
+    /// Just the coverage (alpha, 0..1) at a point, bilinear like `sample`. Text is a white
+    /// mask drawn in a tint, so only this is needed for it: the same pixels for a fraction
+    /// of the work (no colour is weighed, nothing is divided).
+    fn coverage(&self, x: f32, y: f32) -> f32 {
+        let x = x.clamp(0.0, self.w as f32 - 1.0);
+        let y = y.clamp(0.0, self.h as f32 - 1.0);
+        let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
+        let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+        let a = |px: usize, py: usize| self.px[py * self.w + px][3] as f32;
+        let (a00, a10, a01, a11) = (a(x0, y0), a(x1, y0), a(x0, y1), a(x1, y1));
+        if a00 + a10 + a01 + a11 == 0.0 {
+            return 0.0; // most of a letter's box: nothing to blend
+        }
+        ((a00 * (1.0 - fx) + a10 * fx) * (1.0 - fy) + (a01 * (1.0 - fx) + a11 * fx) * fy) / 255.0
+    }
+
     fn sample(&self, x: f32, y: f32) -> [f32; 4] {
         // bilinear, in straight alpha weighted by alpha so edges don't darken
         let x = x.clamp(0.0, self.w as f32 - 1.0);
@@ -472,6 +489,25 @@ impl<'a> Canvas<'a> {
                         v[2] as f32 / 255.0,
                         v[3] as f32 / 255.0,
                     ]
+                } else if tint.is_some() && (kx > 1.5 || ky > 1.5) {
+                    // tinted (text) and shrinking: the same average of a small block, of the
+                    // coverage alone
+                    let n = kx.max(ky).round().max(2.0) as i32;
+                    let mut acc = 0.0f32;
+                    for j in 0..n {
+                        for i in 0..n {
+                            acc += img.coverage(
+                                ix - (n as f32 - 1.0) / 2.0 + i as f32,
+                                iy - (n as f32 - 1.0) / 2.0 + j as f32,
+                            );
+                        }
+                    }
+                    if acc <= 0.0 {
+                        continue;
+                    }
+                    [0.0, 0.0, 0.0, acc / (n * n) as f32]
+                } else if tint.is_some() {
+                    [0.0, 0.0, 0.0, img.coverage(ix, iy)]
                 } else if kx > 1.5 || ky > 1.5 {
                     // shrinking: average a small block so edges stay smooth
                     let n = kx.max(ky).round().max(2.0) as i32;
